@@ -69,6 +69,31 @@ python bot.py
 | `STATE_FILE` | Path to persisted processed match IDs (default `state.json`) |
 | `BOT_STATS_TITLE` | Title on message and scoreboard image (default `BRWNr Bot Stats:`) |
 
+### Optional (rolling stats)
+
+| Variable | Description |
+|----------|-------------|
+| `STATS_COMMAND_ANY_CHANNEL` | Allow `/shamestats` outside the shame channel (default `false`) |
+| `WEEKLY_DIGEST_ENABLED` | Post a weekly leaderboard digest (default `false`) |
+| `WEEKLY_DIGEST_CRON_DAY` | UTC weekday for digest: 0=Monday … 6=Sunday (default `0`) |
+| `WEEKLY_DIGEST_HOUR_UTC` | UTC hour to post digest (default `18`) |
+
+No new API keys are required. The same `FACEIT_API_KEY` and `DISCORD_TOKEN` are used.
+
+## Rolling shame statistics
+
+For each tracked player, the bot caches match outcomes in `state.json` and computes stats over the last `HISTORY_LIMIT` games (default 30):
+
+- **Shame count** — games under `KILL_THRESHOLD` kills
+- **Shame rate** — percentage of cached window games
+- **Current streak** — consecutive recent shame games
+- **Worst kills** — lowest kill count in the window
+- **Title** — fun label (e.g. Saint, Slump, Permanent resident)
+
+These appear on shame posts (Discord text + scoreboard image footer). Use **`/shamestats`** in the shame channel for a leaderboard anytime (slash command; no Message Content Intent).
+
+On first run after an upgrade, the bot may backfill match stats for the history window (one FaceIT request per uncached match, 1s apart). Existing `processed_matches` in `state.json` are preserved.
+
 ## Manual test checklist
 
 1. Fill `.env` with real token, channel ID, API key, and at least one real `FACEIT_PLAYER_IDS` entry.
@@ -77,6 +102,8 @@ python bot.py
 4. After a tracked teammate finishes a new match with &lt;10 kills, wait up to one poll interval; verify a post with title, kill line, and PNG scoreboard.
 5. Restart the bot; previously posted matches must **not** be posted again.
 6. If several tracked players share one match, only **one** shame post should appear.
+7. Run `/shamestats` in the shame channel; verify leaderboard lines per tracked player.
+8. After backfill completes, shame posts should show `Wall record (last 30): X/Y games` for shamed players.
 
 ## Behavior
 
@@ -85,3 +112,6 @@ python bot.py
 - Each poll checks recent history for new matches not yet in `state.json`.
 - Only **tracked** teammates trigger a post; the scoreboard image still shows both teams.
 - Shamed players are highlighted in red on the scoreboard image.
+- Rolling stats (shame count, rate, streak, title) are shown on shame posts when outcome data is cached.
+- `/shamestats` slash command posts a sorted leaderboard (requires bot invite with `applications.commands` scope).
+- With `WEEKLY_DIGEST_ENABLED=true`, a summary posts once per week at the configured UTC day/hour.
