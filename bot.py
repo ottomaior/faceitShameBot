@@ -23,8 +23,23 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 SHAME_CHANNEL_ID = int(os.getenv("SHAME_CHANNEL_ID", "0"))
 KILL_THRESHOLD = int(os.getenv("KILL_THRESHOLD", "10"))
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
-HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "30"))
+POST_HISTORY_LIMIT = int(
+    os.getenv("POST_HISTORY_LIMIT") or os.getenv("HISTORY_LIMIT", "30")
+)
 BOT_STATS_TITLE = os.getenv("BOT_STATS_TITLE", "BRWNr Bot Stats:")
+STATS_BACKFILL_ON_STARTUP = os.getenv("STATS_BACKFILL_ON_STARTUP", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+STATS_BACKFILL_SLEEP_SECONDS = float(os.getenv("STATS_BACKFILL_SLEEP_SECONDS", "1"))
+MENTION_SHAMED_ON_POST = os.getenv("MENTION_SHAMED_ON_POST", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+FACEIT_HISTORY_PAGE_SIZE = 100
+FACEIT_HISTORY_MAX_OFFSET = 1000
 POST_HISTORY_ON_STARTUP = os.getenv(
     "POST_HISTORY_ON_STARTUP", "true"
 ).lower() in ("1", "true", "yes")
@@ -58,9 +73,12 @@ STEAM_ID_RE = re.compile(r"^\d{17}$")
 seen_matches: set[str] = set()
 match_outcomes: dict[str, dict] = {}
 last_digest_at: str | None = None
+stats_backfill_completed_at: str | None = None
+stats_backfill_in_progress = False
 tracked_nicknames: set[str] = set()
 nick_to_player_id: dict[str, str] = {}
 player_id_to_nick: dict[str, str] = {}
+nick_to_discord_id: dict[str, int] = {}
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -194,24 +212,43 @@ def get_player_nickname(player_id: str) -> str | None:
     return data.get("nickname")
 
 
-def get_recent_matches(player_id: str, limit: int | None = None) -> list[dict]:
-    """Return up to HISTORY_LIMIT recent CS2 matches (newest first)."""
-    n = limit if limit is not None else HISTORY_LIMIT
-    data = faceit_get(
-        f"/players/{player_id}/history",
-        {"game": "cs2", "limit": n},
-    )
-    if not data:
-        return []
-    return data.get("items") or []
+def get_all_cs2_matches(player_id: str) -> list[dict]:
+    """Paginate FaceIT CS2 history (newest first). Capped by API offset limit."""
+    all_items: list[dict] = []
+    offset = 0
+    while offset <= FACEIT_HISTORY_MAX_OFFSET:
+        data = faceit_get(
+            f"/players/{player_id}/history",
+            {
+                "game": "cs2",
+                "limit": FACEIT_HISTORY_PAGE_SIZE,
+                "offset": offset,
+            },
+        )
+        if not data:
+            break
+        items = data.get("items") or []
+        if not items:
+            break
+        all_items.extend(items)
+        if len(items) < FACEIT_HISTORY_PAGE_SIZE:
+            break
+        offset += len(items)
+    return all_items
+
+
+def get_post_window_matches(player_id: str) -> list[dict]:
+    """Recent CS2 matches used for posting and /shamestats_recent."""
+    return get_all_cs2_matches(player_id)[:POST_HISTORY_LIMIT]
 
 
 def load_state() -> None:
-    global seen_matches, match_outcomes, last_digest_at
+    global seen_matches, match_outcomes, last_digest_at, stats_backfill_completed_at
     if not os.path.isfile(STATE_FILE):
         seen_matches = set()
         match_outcomes = {}
         last_digest_at = None
+        stats_backfill_completed_at = None
         return
     try:
         with open(STATE_FILE, encoding="utf-8") as f:
@@ -219,6 +256,7 @@ def load_state() -> None:
         seen_matches = set(data.get("processed_matches", []))
         match_outcomes = data.get("match_outcomes") or {}
         last_digest_at = data.get("last_digest_at")
+        stats_backfill_completed_at = data.get("stats_backfill_completed_at")
         log.info(
             "Loaded %d processed match(es), %d outcome(s) from %s",
             len(seen_matches),
@@ -230,6 +268,7 @@ def load_state() -> None:
         seen_matches = set()
         match_outcomes = {}
         last_digest_at = None
+        stats_backfill_completed_at = None
 
 
 def save_state() -> None:
@@ -240,6 +279,7 @@ def save_state() -> None:
                     "processed_matches": sorted(seen_matches),
                     "match_outcomes": match_outcomes,
                     "last_digest_at": last_digest_at,
+                    "stats_backfill_completed_at": stats_backfill_completed_at,
                 },
                 f,
                 indent=2,
@@ -248,44 +288,32 @@ def save_state() -> None:
         log.error("Could not save %s: %s", STATE_FILE, exc)
 
 
-def mark_match_processed(match_id: str) -> None:
+def mark_match_processed(match_id: str, *, persist: bool = True) -> None:
     seen_matches.add(match_id)
-    save_state()
+    if persist:
+        save_state()
 
 
-def collect_history_finished_at() -> dict[str, int]:
-    """Map match_id -> finished_at from recent player histories."""
+def collect_post_window_finished_at() -> dict[str, int]:
+    """Map match_id -> finished_at from post-window player histories."""
     finished: dict[str, int] = {}
     for player_id in PLAYER_IDS:
-        for match in get_recent_matches(player_id):
+        for match in get_post_window_matches(player_id):
             match_id = match.get("match_id")
             if match_id:
                 finished[match_id] = int(match.get("finished_at") or 0)
     return finished
 
 
-def get_active_window_match_ids() -> set[str]:
-    """Union of recent history match IDs across all tracked players."""
+def get_post_window_match_id_set() -> set[str]:
+    """Union of post-window match IDs across all tracked players."""
     window: set[str] = set()
     for player_id in PLAYER_IDS:
-        for match in get_recent_matches(player_id):
+        for match in get_post_window_matches(player_id):
             match_id = match.get("match_id")
             if match_id:
                 window.add(match_id)
     return window
-
-
-def prune_match_outcomes() -> None:
-    """Drop cached outcomes outside the rolling history window."""
-    global match_outcomes
-    window = get_active_window_match_ids()
-    if not window:
-        return
-    before = len(match_outcomes)
-    match_outcomes = {mid: data for mid, data in match_outcomes.items() if mid in window}
-    if len(match_outcomes) < before:
-        save_state()
-        log.info("Pruned match_outcomes: %d -> %d", before, len(match_outcomes))
 
 
 def _player_kills_from_row(player: dict) -> int:
@@ -344,13 +372,25 @@ def record_match_outcomes(
     save_state()
 
 
-def get_player_window_match_ids(player_id: str) -> list[str]:
-    """Recent match IDs for a player, newest first."""
+def get_player_post_window_match_ids(player_id: str) -> list[str]:
+    """Post-window match IDs for a player, newest first."""
     return [
         m["match_id"]
-        for m in get_recent_matches(player_id)
+        for m in get_post_window_matches(player_id)
         if m.get("match_id")
     ]
+
+
+def get_player_alltime_match_ids(player_id: str) -> list[str]:
+    """All cached match IDs for a player, newest first by finished_at."""
+    dated: list[tuple[str, int]] = []
+    for match_id, mo in match_outcomes.items():
+        pdata = mo.get("players", {}).get(player_id)
+        if not pdata:
+            continue
+        dated.append((match_id, int(mo.get("finished_at") or 0)))
+    dated.sort(key=lambda x: x[1], reverse=True)
+    return [match_id for match_id, _ in dated]
 
 
 def get_shame_title(shame_count: int, current_shame_streak: int) -> str:
@@ -365,21 +405,24 @@ def get_shame_title(shame_count: int, current_shame_streak: int) -> str:
     return "Regular"
 
 
-def compute_player_rolling(player_id: str) -> dict:
-    """Aggregate shame stats over the last HISTORY_LIMIT games."""
-    window_ids = get_player_window_match_ids(player_id)
+def _compute_player_shame_from_match_ids(
+    player_id: str, match_ids: list[str]
+) -> dict:
+    """Aggregate shame stats over the given match IDs (newest first)."""
     nickname = player_id_to_nick.get(player_id, player_id)
 
     shame_count = 0
     games_in_window = 0
     shame_kills: list[int] = []
+    all_kills: list[int] = []
     worst_k: int | None = None
+    best_k: int | None = None
     current_shame_streak = 0
     current_clean_streak = 0
     longest_shame_streak = 0
     run = 0
 
-    for match_id in window_ids:
+    for match_id in match_ids:
         mo = match_outcomes.get(match_id)
         if not mo:
             continue
@@ -387,13 +430,17 @@ def compute_player_rolling(player_id: str) -> dict:
         if not pdata:
             continue
         games_in_window += 1
+        kills = pdata["kills"]
+        all_kills.append(kills)
+        if best_k is None or kills > best_k:
+            best_k = kills
         if pdata["shamed"]:
             shame_count += 1
-            shame_kills.append(pdata["kills"])
-            if worst_k is None or pdata["kills"] < worst_k:
-                worst_k = pdata["kills"]
+            shame_kills.append(kills)
+            if worst_k is None or kills < worst_k:
+                worst_k = kills
 
-    for match_id in window_ids:
+    for match_id in match_ids:
         mo = match_outcomes.get(match_id)
         if not mo:
             break
@@ -405,7 +452,7 @@ def compute_player_rolling(player_id: str) -> dict:
         else:
             break
 
-    for match_id in window_ids:
+    for match_id in match_ids:
         mo = match_outcomes.get(match_id)
         if not mo:
             break
@@ -417,7 +464,7 @@ def compute_player_rolling(player_id: str) -> dict:
         else:
             break
 
-    for match_id in reversed(window_ids):
+    for match_id in reversed(match_ids):
         mo = match_outcomes.get(match_id)
         if not mo:
             continue
@@ -436,6 +483,11 @@ def compute_player_rolling(player_id: str) -> dict:
     avg_kills_when_shamed = (
         round(sum(shame_kills) / len(shame_kills), 1) if shame_kills else None
     )
+    avg_kills = round(sum(all_kills) / len(all_kills), 1) if all_kills else None
+    clean_games = games_in_window - shame_count
+    clean_rate = (
+        round(100 * clean_games / games_in_window) if games_in_window else 0
+    )
 
     return {
         "player_id": player_id,
@@ -443,21 +495,65 @@ def compute_player_rolling(player_id: str) -> dict:
         "shame_count": shame_count,
         "games_in_window": games_in_window,
         "shame_rate": shame_rate,
+        "clean_games": clean_games,
+        "clean_rate": clean_rate,
         "current_shame_streak": current_shame_streak,
         "current_clean_streak": current_clean_streak,
         "longest_shame_streak": longest_shame_streak,
         "avg_kills_when_shamed": avg_kills_when_shamed,
+        "avg_kills": avg_kills,
         "worst_kills": worst_k,
+        "best_kills": best_k,
         "title": get_shame_title(shame_count, current_shame_streak),
     }
 
 
-def compute_all_tracked_rolling() -> list[dict]:
-    return [compute_player_rolling(pid) for pid in PLAYER_IDS]
+def compute_player_shame_recent(player_id: str) -> dict:
+    return _compute_player_shame_from_match_ids(
+        player_id, get_player_post_window_match_ids(player_id)
+    )
+
+
+def compute_player_shame_alltime(player_id: str) -> dict:
+    return _compute_player_shame_from_match_ids(
+        player_id, get_player_alltime_match_ids(player_id)
+    )
+
+
+def compute_all_tracked_shame_recent() -> list[dict]:
+    return [compute_player_shame_recent(pid) for pid in PLAYER_IDS]
+
+
+def compute_all_tracked_shame_alltime() -> list[dict]:
+    return [compute_player_shame_alltime(pid) for pid in PLAYER_IDS]
 
 
 def rolling_by_nickname() -> dict[str, dict]:
-    return {r["nickname"]: r for r in compute_all_tracked_rolling()}
+    return {r["nickname"]: r for r in compute_all_tracked_shame_recent()}
+
+
+def get_glory_title(clean_rate: int, best_kills: int | None) -> str:
+    if best_kills is not None and best_kills >= 30:
+        return "Fragger"
+    if clean_rate >= 90:
+        return "Reliable"
+    if clean_rate >= 70:
+        return "Solid"
+    if clean_rate >= 50:
+        return "Mixed"
+    return "Work in progress"
+
+
+def compute_player_glory_alltime(player_id: str) -> dict:
+    stats = compute_player_shame_alltime(player_id)
+    return {
+        **stats,
+        "glory_title": get_glory_title(stats["clean_rate"], stats["best_kills"]),
+    }
+
+
+def compute_all_tracked_glory_alltime() -> list[dict]:
+    return [compute_player_glory_alltime(pid) for pid in PLAYER_IDS]
 
 
 def format_rolling_line(rolling: dict) -> str:
@@ -465,7 +561,9 @@ def format_rolling_line(rolling: dict) -> str:
     gw = rolling["games_in_window"]
     rate = rolling["shame_rate"]
     streak = rolling["current_shame_streak"]
-    parts = [f"Wall record (last {HISTORY_LIMIT}): **{sc}/{gw}** games ({rate}%)"]
+    parts = [
+        f"Wall record (last {POST_HISTORY_LIMIT}): **{sc}/{gw}** games ({rate}%)"
+    ]
     if streak > 0:
         parts.append(f"streak **{streak}**")
     if rolling["worst_kills"] is not None:
@@ -474,17 +572,63 @@ def format_rolling_line(rolling: dict) -> str:
     return " · ".join(parts)
 
 
-def format_leaderboard_message(rolling_list: list[dict]) -> str:
+def _format_shame_row(r: dict) -> str:
+    line = (
+        f"{r['nickname']} — **{r['shame_count']}** shames / "
+        f"**{r['games_in_window']}** games ({r['shame_rate']}%)"
+    )
+    if r["worst_kills"] is not None:
+        line += f" · worst **{r['worst_kills']} K**"
+    if r["current_shame_streak"] > 0:
+        line += f" · streak **{r['current_shame_streak']}**"
+    line += f" · **{r['title']}**"
+    return line
+
+
+def format_shame_leaderboard_message(
+    rows: list[dict], *, scope: str
+) -> str:
     sorted_rows = sorted(
-        rolling_list,
+        rows,
         key=lambda r: (r["shame_count"], r["shame_rate"]),
         reverse=True,
     )
-    lines = [f"**{BOT_STATS_TITLE} Shame Leaderboard** (last {HISTORY_LIMIT} games)"]
+    if scope == "recent":
+        header = (
+            f"**{BOT_STATS_TITLE} Shame Leaderboard** "
+            f"(last {POST_HISTORY_LIMIT} games)"
+        )
+    else:
+        header = (
+            f"**{BOT_STATS_TITLE} Shame Leaderboard** "
+            f"(all CS2 matches on record)"
+        )
+    lines = [header]
     for i, r in enumerate(sorted_rows, 1):
+        lines.append(f"{i}. {_format_shame_row(r)}")
+    if not sorted_rows:
+        lines.append("_No tracked players._")
+    return "\n".join(lines)
+
+
+def format_glory_leaderboard_message(rows: list[dict]) -> str:
+    sorted_rows = sorted(
+        rows,
+        key=lambda r: (r.get("best_kills") or 0, r["clean_rate"], r["avg_kills"] or 0),
+        reverse=True,
+    )
+    lines = [
+        f"**{BOT_STATS_TITLE} Glory Leaderboard** (all CS2 matches on record)"
+    ]
+    for i, r in enumerate(sorted_rows, 1):
+        best = r.get("best_kills")
+        avg = r.get("avg_kills")
+        best_s = f"**{best} K**" if best is not None else "—"
+        avg_s = f"**{avg}**" if avg is not None else "—"
         lines.append(
-            f"{i}. {r['nickname']} — {r['shame_count']} shames / "
-            f"{r['games_in_window']} games ({r['shame_rate']}%) · {r['title']}"
+            f"{i}. {r['nickname']} — best {best_s} · avg {avg_s} · "
+            f"**{r['clean_games']}/{r['games_in_window']}** clean ({r['clean_rate']}%) · "
+            f"**{r['glory_title']}**"
         )
     if not sorted_rows:
         lines.append("_No tracked players._")
@@ -493,7 +637,7 @@ def format_leaderboard_message(rolling_list: list[dict]) -> str:
 
 def format_weekly_digest_message(rolling_list: list[dict]) -> str:
     if not rolling_list:
-        return f"**Weekly Wall of Shame digest** — no data yet."
+        return "**Weekly Wall of Shame digest** — no data yet."
 
     sorted_rows = sorted(
         rolling_list,
@@ -510,9 +654,9 @@ def format_weekly_digest_message(rolling_list: list[dict]) -> str:
     longest = max(rolling_list, key=lambda r: r["longest_shame_streak"])
 
     lines = [
-        f"**Weekly Wall of Shame digest** (last {HISTORY_LIMIT} games)",
+        "**Weekly Wall of Shame digest** (all CS2 matches on record)",
         "",
-        format_leaderboard_message(rolling_list),
+        format_shame_leaderboard_message(rolling_list, scope="all"),
         "",
         f"Most shames: **{top['nickname']}** ({top['shame_count']})",
         f"Cleanest: **{clean['nickname']}** ({clean['shame_count']} shames)",
@@ -525,22 +669,77 @@ def format_weekly_digest_message(rolling_list: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def backfill_match_outcomes() -> None:
-    """Fetch and cache stats for window matches missing from match_outcomes."""
-    window_ids = collect_history_match_ids()
-    finished_map = collect_history_finished_at()
-    missing = [mid for mid in window_ids if mid not in match_outcomes]
-    if not missing:
-        log.info("Outcome backfill: all %d window match(es) cached.", len(window_ids))
-        prune_match_outcomes()
+async def backfill_all_match_outcomes() -> None:
+    """Cache stats for all fetchable CS2 history; mark old matches processed without posting."""
+    global stats_backfill_in_progress, stats_backfill_completed_at
+
+    if not STATS_BACKFILL_ON_STARTUP:
+        log.info("STATS_BACKFILL_ON_STARTUP=false; skipping full history stats backfill.")
         return
 
+    stats_backfill_in_progress = True
+    post_window_ids = get_post_window_match_id_set()
+    finished_map: dict[str, int] = {}
+
+    for player_id in PLAYER_IDS:
+        for match in get_all_cs2_matches(player_id):
+            match_id = match.get("match_id")
+            if match_id:
+                finished_map[match_id] = int(match.get("finished_at") or 0)
+
+    all_ids = sorted(finished_map.keys(), key=lambda m: finished_map[m])
+    total = len(all_ids)
     log.info(
-        "Outcome backfill: fetching %d/%d window match(es)...",
-        len(missing),
-        len(window_ids),
+        "Full stats backfill: %d unique match(es) across tracked players...",
+        total,
     )
+
     cached = 0
+    marked = 0
+    for idx, match_id in enumerate(all_ids, 1):
+        if match_id not in match_outcomes:
+            stats = get_match_stats(match_id)
+            if stats:
+                record_match_outcomes(
+                    match_id,
+                    stats,
+                    finished_at=finished_map.get(match_id),
+                )
+                cached += 1
+
+        if match_id not in post_window_ids and match_id not in seen_matches:
+            mark_match_processed(match_id, persist=False)
+            marked += 1
+
+        if idx % 50 == 0 or idx == total:
+            log.info("Stats backfill progress: %d/%d", idx, total)
+        await asyncio.sleep(STATS_BACKFILL_SLEEP_SECONDS)
+
+    save_state()
+    stats_backfill_in_progress = False
+    stats_backfill_completed_at = datetime.now(timezone.utc).isoformat()
+    save_state()
+    log.info(
+        "Full stats backfill done: %d new cached, %d marked processed (no post), "
+        "%d total outcomes.",
+        cached,
+        marked,
+        len(match_outcomes),
+    )
+
+
+async def backfill_post_window_match_outcomes() -> None:
+    """Cache stats for post-window matches when full history backfill is off."""
+    finished_map = collect_post_window_finished_at()
+    match_ids = list(finished_map.keys())
+    missing = [mid for mid in match_ids if mid not in match_outcomes]
+    if not missing:
+        return
+    log.info(
+        "Post-window outcome backfill: fetching %d/%d match(es)...",
+        len(missing),
+        len(match_ids),
+    )
     for match_id in missing:
         stats = get_match_stats(match_id)
         if stats:
@@ -549,22 +748,14 @@ async def backfill_match_outcomes() -> None:
                 stats,
                 finished_at=finished_map.get(match_id),
             )
-            cached += 1
-        await asyncio.sleep(1)
-
-    prune_match_outcomes()
-    log.info(
-        "Outcome backfill done: cached %d new, %d total in window.",
-        cached,
-        len([m for m in window_ids if m in match_outcomes]),
-    )
+        await asyncio.sleep(STATS_BACKFILL_SLEEP_SECONDS)
 
 
-def collect_history_match_ids() -> list[str]:
-    """Recent history match IDs, oldest finished first."""
+def collect_post_window_match_ids() -> list[str]:
+    """Post-window match IDs, oldest finished first."""
     pending: dict[str, int] = {}
     for player_id in PLAYER_IDS:
-        for match in get_recent_matches(player_id):
+        for match in get_post_window_matches(player_id):
             match_id = match.get("match_id")
             if match_id:
                 pending[match_id] = int(match.get("finished_at") or 0)
@@ -572,10 +763,10 @@ def collect_history_match_ids() -> list[str]:
 
 
 def get_unseen_match_ids() -> list[str]:
-    """Match IDs from recent history not yet processed, oldest finished first."""
+    """Post-window match IDs not yet processed, oldest finished first."""
     return [
         match_id
-        for match_id in collect_history_match_ids()
+        for match_id in collect_post_window_match_ids()
         if match_id not in seen_matches
     ]
 
@@ -735,6 +926,37 @@ def build_scoreboard_image(
     return buf
 
 
+def load_faceit_discord_mentions() -> None:
+    global nick_to_discord_id
+    nick_to_discord_id = {}
+    raw = os.getenv("FACEIT_DISCORD_MENTIONS", "").strip()
+    if not raw:
+        return
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        nick, _, discord_id = part.partition(":")
+        nick = nick.strip()
+        discord_id = discord_id.strip()
+        if not nick or not discord_id.isdigit():
+            log.warning("Skipping invalid FACEIT_DISCORD_MENTIONS entry: %r", part)
+            continue
+        nick_to_discord_id[nick] = int(discord_id)
+        log.info("Discord mention map: %s -> %s", nick, discord_id)
+
+
+def format_shame_mentions(shame_players: dict[str, int]) -> str:
+    if not MENTION_SHAMED_ON_POST or not nick_to_discord_id:
+        return ""
+    parts = []
+    for nick in shame_players:
+        uid = nick_to_discord_id.get(nick)
+        if uid:
+            parts.append(f"<@{uid}>")
+    return " ".join(parts) + " " if parts else ""
+
+
 def format_shame_message(
     shame_players: dict[str, int],
     rolling: dict[str, dict] | None = None,
@@ -801,8 +1023,11 @@ async def post_shame_for_match(
 ) -> None:
     rolling = rolling_by_nickname()
     img_buf = build_scoreboard_image(stats, shame_players, rolling=rolling)
+    content = format_shame_mentions(shame_players) + format_shame_message(
+        shame_players, rolling=rolling
+    )
     await channel.send(
-        format_shame_message(shame_players, rolling=rolling),
+        content,
         file=discord.File(fp=img_buf, filename="shame.png"),
     )
     log.info("Posted shame for match %s: %s", match_id, list(shame_players))
@@ -825,13 +1050,12 @@ async def process_match(
     if not stats:
         return False
 
-    finished_map = collect_history_finished_at()
+    finished_map = collect_post_window_finished_at()
     record_match_outcomes(
         match_id,
         stats,
         finished_at=finished_map.get(match_id),
     )
-    prune_match_outcomes()
 
     shame_players = find_shamed_tracked(stats)
     posted = False
@@ -844,12 +1068,12 @@ async def process_match(
 
 
 async def scan_history_on_startup(channel: discord.abc.Messageable) -> None:
-    """Post retroactive shame for unprocessed games in recent history."""
-    match_ids = collect_history_match_ids()
+    """Post retroactive shame for unprocessed games in post-window history."""
+    match_ids = collect_post_window_match_ids()
     unprocessed = [m for m in match_ids if m not in seen_matches]
 
     if not POST_HISTORY_ON_STARTUP:
-        finished_map = collect_history_finished_at()
+        finished_map = collect_post_window_finished_at()
         for match_id in unprocessed:
             stats = get_match_stats(match_id)
             if stats:
@@ -860,7 +1084,6 @@ async def scan_history_on_startup(channel: discord.abc.Messageable) -> None:
                 )
             mark_match_processed(match_id)
             await asyncio.sleep(1)
-        prune_match_outcomes()
         log.info(
             "POST_HISTORY_ON_STARTUP=false: marked %d match(es) seen without posting.",
             len(unprocessed),
@@ -939,7 +1162,7 @@ async def maybe_post_weekly_digest(channel: discord.abc.Messageable) -> None:
     global last_digest_at
     if not digest_is_due():
         return
-    rolling = compute_all_tracked_rolling()
+    rolling = compute_all_tracked_shame_alltime()
     if not any(r["games_in_window"] for r in rolling):
         return
     await channel.send(format_weekly_digest_message(rolling))
@@ -948,24 +1171,80 @@ async def maybe_post_weekly_digest(channel: discord.abc.Messageable) -> None:
     log.info("Posted weekly shame digest.")
 
 
-@tree.command(
-    name="shamestats",
-    description=f"Shame leaderboard for tracked players (last {HISTORY_LIMIT} games)",
-)
-async def shamestats_command(interaction: discord.Interaction) -> None:
+def _stats_command_allowed(interaction: discord.Interaction) -> bool:
     if (
         not STATS_COMMAND_ANY_CHANNEL
         and SHAME_CHANNEL_ID
         and interaction.channel_id != SHAME_CHANNEL_ID
     ):
+        return False
+    return True
+
+
+async def _reply_stats_blocked(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        "Use this command in the shame channel.",
+        ephemeral=True,
+    )
+
+
+async def _reply_backfill_in_progress(interaction: discord.Interaction) -> bool:
+    if stats_backfill_in_progress:
         await interaction.response.send_message(
-            "Use this command in the shame channel.",
+            "Stats backfill is still running. Try again in a few minutes.",
             ephemeral=True,
         )
+        return True
+    return False
+
+
+@tree.command(
+    name="shamestats_recent",
+    description=f"Shame leaderboard for tracked players (last {POST_HISTORY_LIMIT} games)",
+)
+async def shamestats_recent_command(interaction: discord.Interaction) -> None:
+    if not _stats_command_allowed(interaction):
+        await _reply_stats_blocked(interaction)
+        return
+    if await _reply_backfill_in_progress(interaction):
         return
 
-    rolling = compute_all_tracked_rolling()
-    await interaction.response.send_message(format_leaderboard_message(rolling))
+    rows = compute_all_tracked_shame_recent()
+    await interaction.response.send_message(
+        format_shame_leaderboard_message(rows, scope="recent")
+    )
+
+
+@tree.command(
+    name="shamestats_all",
+    description="Shame leaderboard for tracked players (all cached CS2 matches)",
+)
+async def shamestats_all_command(interaction: discord.Interaction) -> None:
+    if not _stats_command_allowed(interaction):
+        await _reply_stats_blocked(interaction)
+        return
+    if await _reply_backfill_in_progress(interaction):
+        return
+
+    rows = compute_all_tracked_shame_alltime()
+    await interaction.response.send_message(
+        format_shame_leaderboard_message(rows, scope="all")
+    )
+
+
+@tree.command(
+    name="glorystats",
+    description="Glory leaderboard for tracked players (all cached CS2 matches)",
+)
+async def glorystats_command(interaction: discord.Interaction) -> None:
+    if not _stats_command_allowed(interaction):
+        await _reply_stats_blocked(interaction)
+        return
+    if await _reply_backfill_in_progress(interaction):
+        return
+
+    rows = compute_all_tracked_glory_alltime()
+    await interaction.response.send_message(format_glory_leaderboard_message(rows))
 
 
 async def run_bot_loop() -> None:
@@ -976,8 +1255,10 @@ async def run_bot_loop() -> None:
     if channel is None:
         return
 
+    await backfill_all_match_outcomes()
+    if not STATS_BACKFILL_ON_STARTUP:
+        await backfill_post_window_match_outcomes()
     await scan_history_on_startup(channel)
-    await backfill_match_outcomes()
 
     while not client.is_closed():
         for match_id in get_unseen_match_ids():
@@ -1008,6 +1289,7 @@ async def on_ready() -> None:
     log.info("Logged in as %s", client.user)
     resolve_player_ids()
     resolve_tracked_nicknames()
+    load_faceit_discord_mentions()
     try:
         synced = await tree.sync()
         log.info("Synced %d slash command(s).", len(synced))

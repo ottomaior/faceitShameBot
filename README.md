@@ -40,7 +40,7 @@ curl -H "Authorization: Bearer YOUR_KEY" \
 2. Add a **Bot** user and copy the token → `DISCORD_TOKEN`.
 3. Enable **Message Content Intent** if needed; invite the bot with `Send Messages` and `Attach Files`.
 4. Enable **Developer Mode** in Discord, right-click your shame channel → **Copy Channel ID** → `SHAME_CHANNEL_ID`.
-5. **Invite the bot** to that server (OAuth2 URL Generator → `bot` scope). If the bot is not in the server, channel lookup fails.
+5. **Invite the bot** with `bot` and `applications.commands` scopes.
 
 **Channel not found?** The bot must be in the same server as the channel. Copy the channel ID again with Developer Mode; do not use the bot token or Public Key as the channel ID.
 
@@ -61,57 +61,59 @@ python bot.py
 | `DISCORD_TOKEN` | Discord bot token |
 | `FACEIT_API_KEY` | FaceIT Data API bearer token |
 | `SHAME_CHANNEL_ID` | Discord channel ID for shame posts |
-| `FACEIT_PLAYER_IDS` | Comma-separated FaceIT player UUIDs |
+| `FACEIT_PLAYER_IDS` | Comma-separated FaceIT player UUIDs, Steam IDs, or nicknames |
 | `KILL_THRESHOLD` | Post when tracked player has fewer kills (default `10`) |
 | `POLL_INTERVAL_SECONDS` | How often to check for new matches (default `300`) |
-| `HISTORY_LIMIT` | How many recent CS2 games to check per player (default `30`) |
-| `POST_HISTORY_ON_STARTUP` | Post shame for qualifying games in recent history on startup (default `true`) |
-| `STATE_FILE` | Path to persisted processed match IDs (default `state.json`) |
+| `POST_HISTORY_LIMIT` | Recent games for **posts** and `/shamestats_recent` (default `30`). `HISTORY_LIMIT` is an alias. |
+| `POST_HISTORY_ON_STARTUP` | Post shame for qualifying games in post window on startup (default `true`) |
+| `STATS_BACKFILL_ON_STARTUP` | Cache all fetchable CS2 history for stats commands (default `true`) |
+| `STATS_BACKFILL_SLEEP_SECONDS` | Delay between FaceIT match stats requests during backfill (default `1`) |
+| `STATE_FILE` | Path to persisted state (default `state.json`) |
 | `BOT_STATS_TITLE` | Title on message and scoreboard image (default `BRWNr Bot Stats:`) |
 
-### Optional (rolling stats)
+### Optional
 
 | Variable | Description |
 |----------|-------------|
-| `STATS_COMMAND_ANY_CHANNEL` | Allow `/shamestats` outside the shame channel (default `false`) |
-| `WEEKLY_DIGEST_ENABLED` | Post a weekly leaderboard digest (default `false`) |
-| `WEEKLY_DIGEST_CRON_DAY` | UTC weekday for digest: 0=Monday … 6=Sunday (default `0`) |
-| `WEEKLY_DIGEST_HOUR_UTC` | UTC hour to post digest (default `18`) |
+| `FACEIT_DISCORD_MENTIONS` | `ExactFaceITNick:discord_user_id,...` — @mention mapped players on shame posts |
+| `MENTION_SHAMED_ON_POST` | Enable mentions when map is set (default `true`) |
+| `STATS_COMMAND_ANY_CHANNEL` | Allow stats slash commands outside shame channel (default `false`) |
+| `WEEKLY_DIGEST_ENABLED` | Weekly all-time leaderboard digest (default `false`) |
+| `WEEKLY_DIGEST_CRON_DAY` | UTC weekday: 0=Monday … 6=Sunday (default `0`) |
+| `WEEKLY_DIGEST_HOUR_UTC` | UTC hour (default `18`) |
 
-No new API keys are required. The same `FACEIT_API_KEY` and `DISCORD_TOKEN` are used.
+## Slash commands
 
-## Rolling shame statistics
+| Command | Scope |
+|---------|--------|
+| `/shamestats_recent` | Last `POST_HISTORY_LIMIT` games (default 30) |
+| `/shamestats_all` | All cached CS2 matches (after stats backfill) |
+| `/glorystats` | All cached matches — best/avg kills, clean rate |
 
-For each tracked player, the bot caches match outcomes in `state.json` and computes stats over the last `HISTORY_LIMIT` games (default 30):
+All return **aggregate** leaderboards (no per-match list).
 
-- **Shame count** — games under `KILL_THRESHOLD` kills
-- **Shame rate** — percentage of cached window games
-- **Current streak** — consecutive recent shame games
-- **Worst kills** — lowest kill count in the window
-- **Title** — fun label (e.g. Saint, Slump, Permanent resident)
-
-These appear on shame posts (Discord text + scoreboard image footer). Use **`/shamestats`** in the shame channel for a leaderboard anytime (slash command; no Message Content Intent).
-
-On first run after an upgrade, the bot may backfill match stats for the history window (one FaceIT request per uncached match, 1s apart). Existing `processed_matches` in `state.json` are preserved.
-
-## Manual test checklist
-
-1. Fill `.env` with real token, channel ID, API key, and at least one real `FACEIT_PLAYER_IDS` entry.
-2. Start the bot; logs should show resolved nicknames and a retroactive scan. With `POST_HISTORY_ON_STARTUP=true`, qualifying games in the last `HISTORY_LIMIT` matches may post once.
-3. Delete `state.json` only if you want to re-run the retroactive scan (may duplicate posts).
-4. After a tracked teammate finishes a new match with &lt;10 kills, wait up to one poll interval; verify a post with title, kill line, and PNG scoreboard.
-5. Restart the bot; previously posted matches must **not** be posted again.
-6. If several tracked players share one match, only **one** shame post should appear.
-7. Run `/shamestats` in the shame channel; verify leaderboard lines per tracked player.
-8. After backfill completes, shame posts should show `Wall record (last 30): X/Y games` for shamed players.
+**FaceIT history cap:** the Data API returns at most ~1100 matches per player via pagination. Stats commands reflect fetchable history only.
 
 ## Behavior
 
-- On startup with `POST_HISTORY_ON_STARTUP=true` (default), the bot scans the last `HISTORY_LIMIT` games and posts shame for any tracked player with fewer than `KILL_THRESHOLD` kills that was not processed before.
-- Processed match IDs are stored in `state.json` so restarts do not repost the same games.
-- Each poll checks recent history for new matches not yet in `state.json`.
-- Only **tracked** teammates trigger a post; the scoreboard image still shows both teams.
-- Shamed players are highlighted in red on the scoreboard image.
-- Rolling stats (shame count, rate, streak, title) are shown on shame posts when outcome data is cached.
-- `/shamestats` slash command posts a sorted leaderboard (requires bot invite with `applications.commands` scope).
-- With `WEEKLY_DIGEST_ENABLED=true`, a summary posts once per week at the configured UTC day/hour.
+### Shame posts (recent only)
+
+- Polls and startup posts use the **post window** (`POST_HISTORY_LIMIT`) so the channel is not flooded with old games.
+- On startup, a **full history backfill** caches match stats silently; matches outside the post window are marked processed **without** posting.
+- Shame posts show rolling **last N** stats on the message and scoreboard image.
+- Optional **Discord @mentions** for mapped FaceIT nicknames (`FACEIT_DISCORD_MENTIONS`).
+
+### Stats cache
+
+- `match_outcomes` in `state.json` stores kills and shame flags per match (not pruned to 30 games).
+- First startup after upgrade may take several minutes per player (one API call per match, 1s apart).
+- `/shamestats_all` and `/glorystats` are unavailable until backfill finishes (ephemeral message if still running).
+
+## Manual test checklist
+
+1. Fill `.env` with real token, channel ID, API key, and at least one `FACEIT_PLAYER_IDS` entry.
+2. Start the bot; logs show stats backfill progress, then retro scan for post window only.
+3. `/shamestats_recent` — totals for last 30 games; `/shamestats_all` — full cached history.
+4. New sub-threshold game: one shame post within one poll interval; mapped nick gets @mention.
+5. Restart: no duplicate shame posts; stats not re-fetched for cached matches.
+6. `/glorystats` — positive leaderboard from same cache.
