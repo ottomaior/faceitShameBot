@@ -238,8 +238,14 @@ def get_all_cs2_matches(player_id: str) -> list[dict]:
 
 
 def get_post_window_matches(player_id: str) -> list[dict]:
-    """Recent CS2 matches used for posting and /shamestats_recent."""
-    return get_all_cs2_matches(player_id)[:POST_HISTORY_LIMIT]
+    """Recent CS2 matches used for posting and /shamestats_recent (single API call)."""
+    data = faceit_get(
+        f"/players/{player_id}/history",
+        {"game": "cs2", "limit": POST_HISTORY_LIMIT},
+    )
+    if not data:
+        return []
+    return data.get("items") or []
 
 
 def load_state() -> None:
@@ -1206,11 +1212,15 @@ async def shamestats_recent_command(interaction: discord.Interaction) -> None:
     if not _stats_command_allowed(interaction):
         await _reply_stats_blocked(interaction)
         return
-    if await _reply_backfill_in_progress(interaction):
+    if stats_backfill_in_progress:
+        await interaction.response.send_message(
+            "Stats backfill is still running. Try again in a few minutes.",
+            ephemeral=True,
+        )
         return
-
+    await interaction.response.defer()
     rows = compute_all_tracked_shame_recent()
-    await interaction.response.send_message(
+    await interaction.followup.send(
         format_shame_leaderboard_message(rows, scope="recent")
     )
 
@@ -1223,11 +1233,15 @@ async def shamestats_all_command(interaction: discord.Interaction) -> None:
     if not _stats_command_allowed(interaction):
         await _reply_stats_blocked(interaction)
         return
-    if await _reply_backfill_in_progress(interaction):
+    if stats_backfill_in_progress:
+        await interaction.response.send_message(
+            "Stats backfill is still running. Try again in a few minutes.",
+            ephemeral=True,
+        )
         return
-
+    await interaction.response.defer()
     rows = compute_all_tracked_shame_alltime()
-    await interaction.response.send_message(
+    await interaction.followup.send(
         format_shame_leaderboard_message(rows, scope="all")
     )
 
@@ -1240,11 +1254,15 @@ async def glorystats_command(interaction: discord.Interaction) -> None:
     if not _stats_command_allowed(interaction):
         await _reply_stats_blocked(interaction)
         return
-    if await _reply_backfill_in_progress(interaction):
+    if stats_backfill_in_progress:
+        await interaction.response.send_message(
+            "Stats backfill is still running. Try again in a few minutes.",
+            ephemeral=True,
+        )
         return
-
+    await interaction.response.defer()
     rows = compute_all_tracked_glory_alltime()
-    await interaction.response.send_message(format_glory_leaderboard_message(rows))
+    await interaction.followup.send(format_glory_leaderboard_message(rows))
 
 
 async def run_bot_loop() -> None:
