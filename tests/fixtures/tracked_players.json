@@ -1,0 +1,47 @@
+[
+  {
+    "player_id": "64499644-723e-4fa1-b588-f08f7744e1c5",
+    "nickname": "BRNWr",
+    "avatar": "https://distribution.faceit-cdn.net/images/e5774aca-7474-493d-825b-7cf74cba63bd.jpeg",
+    "country": "hu",
+    "skill_level": 6,
+    "faceit_elo": 1295,
+    "faceit_url": "https://www.faceit.com/{lang}/players/BRNWr"
+  },
+  {
+    "player_id": "6e20f3be-622e-4926-a94d-5f770ea3041f",
+    "nickname": "szucsu",
+    "avatar": "https://assets.faceit-cdn.net/avatars/6e20f3be-622e-4926-a94d-5f770ea3041f_1551314211042.jpg",
+    "country": "ro",
+    "skill_level": 6,
+    "faceit_elo": 1228,
+    "faceit_url": "https://www.faceit.com/{lang}/players/szucsu"
+  },
+  {
+    "player_id": "583902e3-8536-4d26-abc9-4f9ef2def9a2",
+    "nickname": "mindtech",
+    "avatar": "https://assets.faceit-cdn.net/avatars/583902e3-8536-4d26-abc9-4f9ef2def9a2_1555003175658.jpg",
+    "country": "ro",
+    "skill_level": 7,
+    "faceit_elo": 1371,
+    "faceit_url": "https://www.faceit.com/{lang}/players/mindtech"
+  },
+  {
+    "player_id": "625d71d4-75cc-442a-9234-965f955da59d",
+    "nickname": "Baanya",
+    "avatar": "",
+    "country": "hu",
+    "skill_level": 6,
+    "faceit_elo": 1254,
+    "faceit_url": "https://www.faceit.com/{lang}/players/Baanya"
+  },
+  {
+    "player_id": "ba138ee8-62c7-486f-8194-089087352377",
+    "nickname": "noXius-",
+    "avatar": "https://assets.faceit-cdn.net/avatars/ba138ee8-62c7-486f-8194-089087352377_1575038801584.jpg",
+    "country": "ro",
+    "skill_level": 4,
+    "faceit_elo": 956,
+    "faceit_url": "https://www.faceit.com/{lang}/players/noXius-"
+  }
+]

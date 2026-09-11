@@ -1,0 +1,35 @@
+{
+  "player_id": "64499644-723e-4fa1-b588-f08f7744e1c5",
+  "nickname": "BRNWr",
+  "avatar": "https://distribution.faceit-cdn.net/images/e5774aca-7474-493d-825b-7cf74cba63bd.jpeg",
+  "country": "hu",
+  "cover_image": "",
+  "games": {
+    "csgo": {
+      "region": "EU",
+      "game_player_id": "76561198899254198",
+      "skill_level": 3,
+      "faceit_elo": 1084,
+      "game_player_name": "BW",
+      "skill_level_label": "",
+      "regions": {},
+      "game_profile_id": ""
+    },
+    "cs2": {
+      "region": "EU",
+      "game_player_id": "76561198899254198",
+      "skill_level": 6,
+      "faceit_elo": 1295,
+      "game_player_name": "BW",
+      "skill_level_label": "",
+      "regions": {},
+      "game_profile_id": ""
+    }
+  },
+  "steam_nickname": "BW",
+  "faceit_url": "https://www.faceit.com/{lang}/players/BRNWr",
+  "membership_type": "",
+  "cover_featured_image": "",
+  "verified": false,
+  "activated_at": "2020-03-07T11:50:56.66Z"
+}
