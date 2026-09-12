@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import ui
 
+from .leetify import ATTRIBUTION
 from .render import theme as T
 from .rules import PostKind, award_emoji, award_label
 
@@ -204,6 +205,7 @@ def image_view(
     text: str | None = None,
     thumbnail: str | None = None,
     link: tuple[str, str] | None = None,
+    links: list[tuple[str, str]] | None = None,
 ) -> tuple[ui.LayoutView, list[discord.File]]:
     head = ui.TextDisplay(title)
     items: list[ui.Item] = [ui.Section(head, accessory=ui.Thumbnail(thumbnail)) if thumbnail else head]
@@ -211,11 +213,41 @@ def image_view(
     if text:
         items.append(ui.Separator())
         items.append(ui.TextDisplay(text))
-    if link:
-        items.append(ui.ActionRow(ui.Button(label=link[0], url=link[1], emoji="🔗")))
+    all_links = ([link] if link else []) + list(links or [])
+    if all_links:
+        items.append(ui.ActionRow(*(ui.Button(label=lb, url=u, emoji="🔗") for lb, u in all_links[:5])))
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*items, accent_colour=_colour(palette)))
     return view, [_file(png, filename)]
+
+
+def compare_view(
+    res,
+    png: bytes,
+    *,
+    scope_label: str,
+    links: list[tuple[str, str]],
+) -> tuple[ui.LayoutView, list[discord.File]]:
+    """Head-to-head message: verdict text + card + profile links."""
+    lines = [f"## ⚔️ {res.a_name} vs {res.b_name}", f"-# {scope_label}", "", res.verdict]
+    if res.jab:
+        lines.append(f"_{res.jab}_")
+    if res.reasons:
+        lines.append("")
+        emoji = {c.name: c.emoji for c in res.categories}
+        lines.extend(f"{emoji.get(r.split(':')[0], '•')} {r}" for r in res.reasons)
+    for note in res.notes:
+        lines.append(f"-# ⚠️ {note}")
+    lines.append(f"-# {ATTRIBUTION} · FaceIT Data API")
+    items: list[ui.Item] = [
+        ui.TextDisplay("\n".join(lines)[:3900]),
+        ui.MediaGallery(discord.MediaGalleryItem("attachment://compare.png")),
+    ]
+    if links:
+        items.append(ui.ActionRow(*(ui.Button(label=lb, url=u, emoji="🔗") for lb, u in links[:5])))
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*items, accent_colour=_colour(T.REDEMPTION if res.winner else T.NEUTRAL)))
+    return view, [_file(png, "compare.png")]
 
 
 def text_view(text: str, *, palette: T.Palette = T.NEUTRAL) -> ui.LayoutView:
@@ -263,7 +295,7 @@ def help_text(app: "App") -> list[str]:
         "`/glory` — best games, clean rate, averages\n"
         "`/profile [player]` — level, ELO trend, averages, last-10 form, maps\n"
         "`/last [player]` — most recent match as a card\n"
-        "`/compare a b` — head to head\n"
+        "`/compare a b` — head-to-head verdict: who is actually better (FaceIT + Leetify analytics)\n"
         "`/maps [player]` — per-map record\n"
         "`/elo` — ELO ranking with 7-day / 30-day change\n"
         "`/awards` — hall of shame records\n"

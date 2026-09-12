@@ -65,6 +65,20 @@ class PlayerAggregate:
     aces: int = 0
     bottom_of_lobby: int = 0
     elo_sum: int = 0  # sum of known elo deltas in the window
+    kills_std: float | None = None
+    # extended-only (schema v3 records; None when the window has none)
+    extended_games: int = 0
+    rounds: int = 0
+    kpr: float | None = None
+    entry_success_pct: float | None = None
+    entry_rate: float | None = None
+    first_kills_pr: float | None = None
+    clutch_pct: float | None = None
+    clutch_attempts: int = 0
+    util_dmg_pr: float | None = None
+    flashed_pr: float | None = None
+    flash_success_pct: float | None = None
+    sniper_share_pct: float | None = None
     form: list[str] = field(default_factory=list)  # newest first: "S" shamed, "G" glory, "C" clean, "W"/"L" via form_wl
     form_wl: list[str] = field(default_factory=list)  # newest first: "W", "L", "?"
 
@@ -100,6 +114,8 @@ def aggregate(
     hss: list[float] = []
     mvps: list[float] = []
     enriched = 0
+    ext = {"kills": 0, "rounds": 0, "entry_c": 0, "entry_w": 0, "fk": 0, "clutch_c": 0, "clutch_w": 0,
+           "util": 0, "flashed": 0, "flash_c": 0, "flash_w": 0, "sniper": 0}
 
     for m, r in results:
         agg.games += 1
@@ -128,6 +144,20 @@ def aggregate(
                 agg.bottom_of_lobby += 1
             if r.elo_delta is not None:
                 agg.elo_sum += r.elo_delta
+            if r.extended and (m.rounds or 0) > 0:
+                agg.extended_games += 1
+                ext["kills"] += r.kills
+                ext["rounds"] += m.rounds or 0
+                ext["entry_c"] += r.entry_count or 0
+                ext["entry_w"] += r.entry_wins or 0
+                ext["fk"] += r.first_kills or 0
+                ext["clutch_c"] += (r.c1v1 or 0) + (r.c1v2 or 0)
+                ext["clutch_w"] += (r.w1v1 or 0) + (r.w1v2 or 0)
+                ext["util"] += r.utility_damage or 0
+                ext["flashed"] += r.enemies_flashed or 0
+                ext["flash_c"] += r.flash_count or 0
+                ext["flash_w"] += r.flash_successes or 0
+                ext["sniper"] += r.sniper_kills or 0
         if len(agg.form) < 10:
             agg.form.append("S" if r.shamed else ("G" if r.kills >= glory_kills else "C"))
             agg.form_wl.append("?" if r.result is None else ("W" if r.result == 1 else "L"))
@@ -159,6 +189,22 @@ def aggregate(
     agg.title = get_shame_title(agg.shame_count, agg.current_shame_streak)
     agg.glory_title = get_glory_title(agg.clean_rate, agg.best_kills)
 
+    if len(kills_all) >= 2:
+        mean = sum(kills_all) / len(kills_all)
+        agg.kills_std = round((sum((k - mean) ** 2 for k in kills_all) / len(kills_all)) ** 0.5, 1)
+    if agg.extended_games:
+        rounds = ext["rounds"]
+        agg.rounds = rounds
+        agg.kpr = round(ext["kills"] / rounds, 2)
+        agg.entry_rate = round(ext["entry_c"] / rounds, 2)
+        agg.entry_success_pct = round(100 * ext["entry_w"] / ext["entry_c"]) if ext["entry_c"] else None
+        agg.first_kills_pr = round(ext["fk"] / rounds, 2)
+        agg.clutch_attempts = ext["clutch_c"]
+        agg.clutch_pct = round(100 * ext["clutch_w"] / ext["clutch_c"]) if ext["clutch_c"] else None
+        agg.util_dmg_pr = round(ext["util"] / rounds, 1)
+        agg.flashed_pr = round(ext["flashed"] / rounds, 2)
+        agg.flash_success_pct = round(100 * ext["flash_w"] / ext["flash_c"]) if ext["flash_c"] else None
+        agg.sniper_share_pct = round(100 * ext["sniper"] / ext["kills"]) if ext["kills"] else None
     if enriched:
         decided = agg.wins + agg.losses
         agg.win_rate = round(100 * agg.wins / decided) if decided else None

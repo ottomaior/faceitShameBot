@@ -62,7 +62,10 @@ def test_render_leaderboard_profile_compare():
     a = aggregate("p", [], nickname="P")
     data = ProfileData("P", None, 6, 1300, "hu", -5, 20, [1200, 1250, 1300], a, a, [])
     assert _png_size(render_profile(data))[0] == 1200
-    assert _png_size(render_compare(CompareSide(a, None, 6, 1300), CompareSide(a, None, 7, 1400), subtitle="s"))[0] == 1200
+    from shamebot.compare import build_categories, score, write_verdict
+
+    res = write_verdict(score("A", "B", build_categories(a, a, elo_a=1300, elo_b=1400, leet_a=None, leet_b=None)), seed="t")
+    assert _png_size(render_compare(CompareSide("A", None, 6, 1300, "Saint", False), CompareSide("B", None, 7, 1400, "Slump", False), res, subtitle="s"))[0] == 1200
 
 
 def _app(tracked) -> App:

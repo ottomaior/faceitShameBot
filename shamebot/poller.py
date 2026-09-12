@@ -10,6 +10,7 @@ import discord
 from discord.ext import tasks
 
 from .app import App
+from .models import SCHEMA_VERSION
 from .rules import Detection, PostKind
 from .stats import HallEntry
 from .views import MENTION_USERS, leaderboard_view, match_view
@@ -215,14 +216,14 @@ class Poller:
         pending = self.app.state.pending_enrichment()
         if not pending:
             self.enrich_loop.stop()
-            log.info("All cached matches are on schema v2.")
+            log.info("All cached matches are on schema v%d.", SCHEMA_VERSION)
             return
         mid = pending[0]
         old = self.app.state.match_outcomes[mid]
         rec = await self.app.fetch_record(mid, finished_at=old.finished_at, with_details=False)
         if rec is None:
-            # keep the kills-only record but stop retrying it
-            old.v = 2
+            # keep the old record but stop retrying it
+            old.v = SCHEMA_VERSION
             self.app.state.put_match(old)
             return
         for pid, r in rec.players.items():

@@ -8,9 +8,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .config import Settings
+from .compare import CompareResult, build_categories, score, write_verdict
 from .faceit import FaceitClient
+from .leetify import LeetifyClient, LeetifyProfile
 from .models import MatchRecord, PlayerSnapshot, parse_match
 from .render import theme as T
+from .render.compare_card import CompareSide, render_compare
 from .render.leaderboard_card import LeaderRow, render_leaderboard
 from .render.profile_card import ProfileData, render_profile
 from .render.shame_card import HeroPlayer, render_match_card
@@ -38,6 +41,7 @@ class App:
         self.state = State(settings.state_file)
         self.faceit = FaceitClient(settings.faceit_api_key)
         self.roasts = RoastEngine(level=settings.roast_level, custom_file=settings.custom_roasts_file)
+        self.leetify = LeetifyClient(settings.leetify_api_key or None, enabled=settings.leetify_enabled)
         self.tracked: dict[str, str] = {}  # player_id -> nickname
         self.backfill_in_progress = False
         self.thresholds = Thresholds(
@@ -287,6 +291,7 @@ class App:
             alltime=alltime,
             maps=per_map(pid, self.state.matches_for_player(pid)),
             window=self.settings.post_history_limit,
+            leetify=await self.leetify_profile(pid),
         )
         return await asyncio.to_thread(render_profile, data, footer=self.settings.bot_stats_title.rstrip(":"))
 
@@ -295,6 +300,61 @@ class App:
         by_player = group_by_player(list(self.state.match_outcomes.values()))
         return hall_of_shame(aggs, {pid: by_player.get(pid, []) for pid in self.tracked_ids})
 
+    # -------------------------------------------------------------- leetify
+
+    async def leetify_profile(self, pid: str) -> LeetifyProfile | None:
+        snap = self.state.snapshot(pid)
+        if not snap or not snap.steam_id:
+            return None
+        return await self.leetify.profile(snap.steam_id)
+
+    async def leetify_window_ratings(self, pids: list[str], *, scope: str, cap: int | None = None) -> dict[str, list[float]]:
+        """Per-match Leetify ratings (fractions, newest first) for each player's window, all 10 players per match."""
+        if cap is None:
+            cap = 20 if self.leetify.has_key else 8  # unauthenticated Leetify access is rate limited tightly
+        steam = {pid: (self.state.snapshot(pid).steam_id if self.state.snapshot(pid) else None) for pid in pids}
+        windows = {pid: [m.match_id for m in (self.recent_records(pid) if scope == "recent" else self.state.matches_for_player(pid))[:cap]] for pid in pids}
+        ids = list(dict.fromkeys(mid for w in windows.values() for mid in w))
+        fetched = await asyncio.gather(*(self.leetify.match_ratings(mid) for mid in ids))
+        by_match = dict(zip(ids, fetched))
+        out: dict[str, list[float]] = {}
+        for pid in pids:
+            sid = steam.get(pid)
+            out[pid] = [by_match[mid][sid] for mid in windows[pid] if sid and by_match.get(mid) and sid in by_match[mid]]  # type: ignore[index]
+        return out
+
+    # -------------------------------------------------------------- compare
+
+    async def compare(self, pa: str, pb: str, *, scope: str) -> tuple[CompareResult, bytes]:
+        agg_a, agg_b = self.aggregate(pa, scope=scope), self.aggregate(pb, scope=scope)
+        snap_a, snap_b = self.state.snapshot(pa), self.state.snapshot(pb)
+        leet_a, leet_b = await self.leetify_profile(pa), await self.leetify_profile(pb)
+        window = await self.leetify_window_ratings([pa, pb], scope=scope) if self.settings.leetify_enabled else {}
+        notes: list[str] = []
+        for name, leet in ((agg_a.nickname, leet_a), (agg_b.nickname, leet_b)):
+            if leet is None and self.settings.leetify_enabled:
+                notes.append(f"No Leetify profile for **{name}** — Leetify metrics skipped on that side (sign up at leetify.com for full coverage).")
+        if self.leetify.rate_limited:
+            notes.append("Leetify is rate-limiting right now — some Leetify metrics may be missing.")
+        for name, agg in ((agg_a.nickname, agg_a), (agg_b.nickname, agg_b)):
+            if agg.games and not agg.extended_games:
+                notes.append(f"Extended FaceIT stats for **{name}** are still being cached — entry/clutch/utility categories will fill in shortly.")
+        cats = build_categories(
+            agg_a, agg_b,
+            elo_a=snap_a.elo if snap_a else None, elo_b=snap_b.elo if snap_b else None,
+            leet_a=leet_a, leet_b=leet_b,
+            window_leet_a=window.get(pa), window_leet_b=window.get(pb),
+        )
+        res = score(agg_a.nickname, agg_b.nickname, cats, notes=notes)
+        loser = agg_b if res.winner == -1 else agg_a
+        write_verdict(res, seed=f"{pa}|{pb}|{scope}", shame_rate_loser=loser.shame_rate)
+        sides = []
+        for pid, agg, snap, leet in ((pa, agg_a, snap_a, leet_a), (pb, agg_b, snap_b, leet_b)):
+            sides.append(CompareSide(agg.nickname, await self._avatar_bytes(pid), snap.level if snap else None, snap.elo if snap else None, agg.title, leet is not None))
+        png = await asyncio.to_thread(render_compare, sides[0], sides[1], res, subtitle=self.scope_label(scope), footer=self.settings.bot_stats_title.rstrip(":"))
+        return res, png
+
     async def close(self) -> None:
         self.state.flush()
         await self.faceit.close()
+        await self.leetify.close()

@@ -185,5 +185,27 @@ def preview_boards() -> None:
     (OUT / "7_profile.png").write_bytes(render_profile(data, footer="BRWNr Bot Stats"))
 
 
+def preview_compare() -> None:
+    from shamebot.compare import build_categories, score, write_verdict
+    from shamebot.leetify import LeetifyProfile
+    from shamebot.render.compare_card import CompareSide, render_compare
+    from shamebot.stats import PlayerAggregate
+
+    tracked_list = load("tracked_players.json")
+    pa, pb = tracked_list[0], tracked_list[1]
+    a = PlayerAggregate(pa["player_id"], pa["nickname"], games=30, shame_count=6, shame_rate=20, win_rate=47, avg_kd=0.96, avg_adr=74.1, avg_hs=48.0, longest_shame_streak=2, kills_std=5.1,
+                        extended_games=30, kpr=0.68, entry_success_pct=52, first_kills_pr=0.12, clutch_pct=33, util_dmg_pr=5.2, flashed_pr=0.31, title="Slump")
+    b = PlayerAggregate(pb["player_id"], pb["nickname"], games=30, shame_count=9, shame_rate=30, win_rate=40, avg_kd=0.79, avg_adr=66.0, avg_hs=41.0, longest_shame_streak=4, kills_std=6.4,
+                        extended_games=30, kpr=0.58, entry_success_pct=44, first_kills_pr=0.09, clutch_pct=40, util_dmg_pr=7.9, flashed_pr=0.44, title="Regular")
+    la = LeetifyProfile(pa["player_id"], pa["nickname"], rating=0.06, aim=67.4, positioning=60.3, utility=42.1, clutch=0.09, opening=0.02, preaim=11.3, reaction_time_ms=648, spray_accuracy=40.5, opening_duel_ct_pct=53.7, opening_duel_t_pct=44.0, trade_kill_pct=44.2, traded_death_pct=61.5)
+    lb = LeetifyProfile(pb["player_id"], pb["nickname"], rating=-1.9, aim=27.8, positioning=48.0, utility=62.5, clutch=0.05, opening=-0.03, preaim=14.9, reaction_time_ms=702, spray_accuracy=31.2, opening_duel_ct_pct=45.1, opening_duel_t_pct=40.3, trade_kill_pct=47.0, traded_death_pct=58.2)
+    cats = build_categories(a, b, elo_a=pa["faceit_elo"], elo_b=pb["faceit_elo"], leet_a=la, leet_b=lb, window_leet_a=[0.01, 0.02, -0.005, 0.03], window_leet_b=[-0.02, -0.01, -0.03, 0.0])
+    res = write_verdict(score(a.nickname, b.nickname, cats), seed="preview", shame_rate_loser=30)
+    print("verdict:", res.verdict, "|", res.jab)
+    sides = [CompareSide(a.nickname, image_bytes(pa["avatar"]), pa["skill_level"], pa["faceit_elo"], a.title, True), CompareSide(b.nickname, image_bytes(pb["avatar"]), pb["skill_level"], pb["faceit_elo"], b.title, True)]
+    (OUT / "8_compare.png").write_bytes(render_compare(sides[0], sides[1], res, subtitle="Last 30 games per player", footer="BRWNr Bot Stats"))
+
+
 if __name__ == "__main__":
     preview_boards()
+    preview_compare()

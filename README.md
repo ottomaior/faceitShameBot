@@ -31,7 +31,7 @@ Carried · Anchor · Spectator · Fed · Zero MVP club · Headless.
 | `/glory` | Glory board: best game, clean rate, averages |
 | `/profile [player]` | Player card: level, ELO + 7d/30d change + trend, averages, last-10 form, per-map summary |
 | `/last [player]` | The player's most recent match as a card |
-| `/compare a b [scope]` | Head-to-head card |
+| `/compare a b [scope]` | Head-to-head **verdict**: 8 weighted categories (Impact, Fragging, Opening, Aim, Clutch, Utility, Teamplay, Consistency) over FaceIT extended stats + Leetify analytics → winner, score, margin, reasons, and a jab |
 | `/maps [player]` | Per-map games / win % / avg kills / wall % |
 | `/elo` | Tracked players ranked by ELO with 7d/30d deltas |
 | `/awards` | Hall of shame: worst game ever, longest streak, biggest ELO loss… |
@@ -86,6 +86,7 @@ See [`.env.example`](.env.example) — every variable is documented there. Highl
 | `SHAME_REACTIONS` | `🤡` | Reactions added to shame posts |
 | `CUSTOM_ROASTS_FILE` | `roasts_custom.txt` | Your own roast lines (see `roasts_custom.txt.example`) |
 | `ADMIN_DISCORD_IDS` | – | Who may run `/shametest` |
+| `LEETIFY_API_KEY` | – | Optional Leetify API key (leetify.com/app/developer) for `/compare` and `/profile`; `LEETIFY_ENABLED=false` turns Leetify off |
 | `STATE_FILE` | `state.json` | Persisted cache (use a volume path in production) |
 
 ## How it works
@@ -95,6 +96,8 @@ See [`.env.example`](.env.example) — every variable is documented there. Highl
 - `shamebot/state.py` — `state.json` (schema v2): full 10-player scoreboard + ADR/K-D/HS/MVP/W-L per
   match, ELO history per player. Older kills-only entries are upgraded in the background.
 - `shamebot/rules.py` / `roasts.py` — detection, awards, deterministic roast selection.
+- `shamebot/leetify.py` / `compare.py` — Leetify public API client (live only, never persisted, "Data
+  provided by Leetify" attribution) and the head-to-head verdict engine.
 - `shamebot/render/` — Pillow cards (bundled Inter + Bebas Neue fonts, SIL OFL).
 - `shamebot/views.py` / `commands.py` — Components V2 messages, persistent buttons, slash commands.
 

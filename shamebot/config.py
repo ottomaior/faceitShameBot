@@ -84,6 +84,10 @@ class Settings:
     # --- ELO ----------------------------------------------------------------
     elo_tracking_enabled: bool = _bool("ELO_TRACKING_ENABLED", "true")
 
+    # --- Leetify (external analytics, optional) -----------------------------
+    leetify_enabled: bool = _bool("LEETIFY_ENABLED", "true")
+    leetify_api_key: str = os.getenv("LEETIFY_API_KEY", "").strip()
+
     # --- weekly digest ------------------------------------------------------
     weekly_digest_enabled: bool = _bool("WEEKLY_DIGEST_ENABLED", "false")
     weekly_digest_cron_day: int = _int("WEEKLY_DIGEST_CRON_DAY", "0")

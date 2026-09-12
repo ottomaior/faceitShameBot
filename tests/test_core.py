@@ -24,7 +24,7 @@ def _record(fixtures, tracked, suffix="") -> MatchRecord:
 
 def test_parse_match_fields(fixtures, tracked):
     rec = _record(fixtures, tracked, "_shame")
-    assert rec.v == 2
+    assert rec.v == 3
     assert rec.map == "de_ancient"
     assert rec.score == "7 / 13"
     assert rec.rounds == 20
@@ -234,8 +234,8 @@ def test_state_migration_from_v1(tmp_path, fixtures, tracked):
     st.put_match(rec)
     st.save()
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["schema_version"] == 2
-    assert data["match_outcomes"][rec.match_id]["v"] == 2
+    assert data["schema_version"] == 3
+    assert data["match_outcomes"][rec.match_id]["v"] == 3
     assert data["match_outcomes"]["a"]["v"] == 1  # untouched until enriched
 
     st2 = State(str(path))

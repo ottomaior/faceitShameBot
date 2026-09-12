@@ -83,6 +83,10 @@ class FaceitClient:
     async def get_player(self, player_id: str) -> dict | None:
         return await self.get(f"/players/{player_id}")
 
+    async def get_player_stats(self, player_id: str) -> dict | None:
+        """Lifetime + per-map CS2 stats (``lifetime`` dict and ``segments`` list)."""
+        return await self.get(f"/players/{player_id}/stats/cs2")
+
     async def get_history(self, player_id: str, *, limit: int, offset: int = 0) -> list[dict]:
         data = await self.get(
             f"/players/{player_id}/history", {"game": "cs2", "limit": limit, "offset": offset}

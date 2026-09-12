@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image, ImageDraw
 
+from ..leetify import ATTRIBUTION, LeetifyProfile, fmt_rating
 from ..stats import MapStat, PlayerAggregate
 from . import primitives as P
 from . import theme as T
@@ -28,6 +29,7 @@ class ProfileData:
     alltime: PlayerAggregate
     maps: list[MapStat] = field(default_factory=list)
     window: int = 30
+    leetify: LeetifyProfile | None = None
 
 
 def _delta(v: int | None) -> tuple[str, tuple]:
@@ -38,7 +40,8 @@ def _delta(v: int | None) -> tuple[str, tuple]:
 
 def render_profile(data: ProfileData, *, footer: str = "") -> bytes:
     pal = T.NEUTRAL if data.recent.shame_rate < 25 else T.SHAME
-    img = Image.new("RGB", (W, H), T.BG)
+    total_h = H + (110 if data.leetify else 0)
+    img = Image.new("RGB", (W, total_h), T.BG)
     img.paste(P.background((W, 250), None, pal.accent_dark).convert("RGB"), (0, 0))
     draw = ImageDraw.Draw(img, "RGBA")
     draw.rectangle((0, 0, W, 6), fill=pal.accent)
@@ -133,6 +136,24 @@ def render_profile(data: ProfileData, *, footer: str = "") -> bytes:
         if mx > W - MARGIN - 200:
             break
 
+    if data.leetify:
+        lt = data.leetify
+        ly = H - 4
+        P.draw_text(draw, (MARGIN, ly), ATTRIBUTION.upper(), T.font("semibold", 12), T.MUTED)
+        ltiles = [
+            (fmt_rating(lt.rating), "leetify rating", T.GOOD if (lt.rating or 0) > 0 else (T.BAD if (lt.rating or 0) < 0 else T.TEXT)),
+            (f"{lt.aim:.0f}" if lt.aim is not None else "—", "aim", T.TEXT),
+            (f"{lt.positioning:.0f}" if lt.positioning is not None else "—", "positioning", T.TEXT),
+            (f"{lt.utility:.0f}" if lt.utility is not None else "—", "utility", T.TEXT),
+            (f"{lt.reaction_time_ms:.0f} ms" if lt.reaction_time_ms is not None else "—", "reaction time", T.TEXT),
+            (f"{lt.preaim:.1f}" if lt.preaim is not None else "—", "preaim", T.TEXT),
+            (f"{lt.spray_accuracy:.0f}%" if lt.spray_accuracy is not None else "—", "spray acc.", T.TEXT),
+            (f"{lt.opening_duel_pct:.0f}%" if lt.opening_duel_pct is not None else "—", "opening duels", T.TEXT),
+        ]
+        lw = (W - MARGIN * 2 - 12 * (len(ltiles) - 1)) / len(ltiles)
+        for i, (val, label, col) in enumerate(ltiles):
+            lx = MARGIN + i * (lw + 12)
+            P.stat_tile(draw, (int(lx), ly + 20, int(lx + lw), ly + 88), val, label, value_color=col, fill=T.PANEL + (255,), value_size=26)
     if footer:
-        P.draw_text(draw, (W - MARGIN, H - 14), footer, T.font("semibold", 12), T.DIM, anchor="rm")
+        P.draw_text(draw, (W - MARGIN, total_h - 14), footer, T.font("semibold", 12), T.DIM, anchor="rm")
     return P.to_png(img)

@@ -1,7 +1,6 @@
 """Slash commands. All replies use Components V2 views."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Literal
 
@@ -10,10 +9,10 @@ from discord import app_commands
 
 from .app import App
 from .render import theme as T
-from .render.compare_card import CompareSide, render_compare
 from .rules import PostKind, compute_awards
 from .stats import elo_change
-from .views import MENTION_USERS, help_view, image_view, leaderboard_view, load_example_card, match_view, text_view
+from .leetify import ATTRIBUTION, profile_url as leetify_profile_url
+from .views import MENTION_USERS, compare_view, help_view, image_view, leaderboard_view, load_example_card, match_view, text_view
 
 log = logging.getLogger(__name__)
 
@@ -128,13 +127,18 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
             + (f" ({d7:+d} / 7d)" if d7 is not None else "")
             + f" · last {s.post_history_limit}: **{recent.shame_count}** shames ({recent.shame_rate}%) · *{recent.title}*"
         )
+        leet = await app.leetify_profile(pid)
+        links = [("FaceIT profile", snap.faceit_url)] if snap and snap.faceit_url else []
+        if leet:
+            links.append(("View on Leetify", leet.url))
+            text += f"\n-# {ATTRIBUTION}"
         view, files = image_view(
             text,
             png,
             filename=f"profile-{pid[:8]}.png",
             palette=T.SHAME if recent.shame_rate >= 25 else T.NEUTRAL,
             thumbnail=snap.avatar if snap else None,
-            link=("FaceIT profile", snap.faceit_url) if snap and snap.faceit_url else None,
+            links=links,
         )
         await interaction.followup.send(view=view, files=files)
 
@@ -169,7 +173,7 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
         view, files = match_view(app, post, mention_ids=None, buttons=True)
         await interaction.followup.send(view=view, files=files, allowed_mentions=MENTION_USERS)
 
-    @tree.command(name="compare", description="Head-to-head of two tracked players")
+    @tree.command(name="compare", description="Head-to-head verdict: who is the better player (FaceIT + Leetify)")
     @app_commands.describe(a="First player", b="Second player", scope="recent (default) or all")
     @app_commands.autocomplete(a=nick_autocomplete, b=nick_autocomplete)
     async def compare(interaction: discord.Interaction, a: str, b: str, scope: Scope = "recent") -> None:
@@ -179,13 +183,23 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
         if not pa or not pb:
             await interaction.response.send_message(f"Both players must be tracked. Tracked: {', '.join(app.tracked.values())}", ephemeral=True)
             return
+        if pa == pb:
+            await interaction.response.send_message("Comparing a player with themselves. Bold. Pick two different players.", ephemeral=True)
+            return
         await interaction.response.defer()
-        sides = []
+        await app.refresh_snapshot(pa)
+        await app.refresh_snapshot(pb)
+        res, png = await app.compare(pa, pb, scope=scope)
+        links: list[tuple[str, str]] = []
         for pid in (pa, pb):
             snap = app.state.snapshot(pid)
-            sides.append(CompareSide(app.aggregate(pid, scope=scope), await app._avatar_bytes(pid), snap.level if snap else None, snap.elo if snap else None))
-        png = await asyncio.to_thread(render_compare, sides[0], sides[1], subtitle=app.scope_label(scope), footer=s.bot_stats_title.rstrip(":"))
-        view, files = image_view(f"## ⚔️ {app.nick(pa)} vs {app.nick(pb)}\n{app.scope_label(scope)}", png, filename="compare.png")
+            if snap and snap.faceit_url:
+                links.append((f"{app.nick(pid)} on FaceIT", snap.faceit_url))
+        for pid in (pa, pb):
+            snap = app.state.snapshot(pid)
+            if snap and snap.steam_id and await app.leetify_profile(pid):
+                links.append((f"{app.nick(pid)} on Leetify", leetify_profile_url(snap.steam_id)))
+        view, files = compare_view(res, png, scope_label=app.scope_label(scope), links=links)
         await interaction.followup.send(view=view, files=files)
 
     @tree.command(name="maps", description="Per-map record for a tracked player")

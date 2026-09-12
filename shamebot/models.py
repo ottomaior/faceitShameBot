@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # v3 = extended per-match stats (entry/clutch/utility/flash)
 
 
 def _int(v: Any, default: int = 0) -> int:
@@ -31,6 +31,7 @@ class PlayerSnapshot:
     nickname: str
     avatar: str | None = None
     country: str | None = None
+    steam_id: str | None = None  # steam64, needed for Leetify lookups
     level: int | None = None
     elo: int | None = None
     elo_updated_at: str | None = None
@@ -52,6 +53,7 @@ class PlayerSnapshot:
             nickname=d.get("nickname") or player_id,
             avatar=d.get("avatar"),
             country=d.get("country"),
+            steam_id=d.get("steam_id"),
             level=_opt_int(d.get("level")),
             elo=_opt_int(d.get("elo")),
             elo_updated_at=d.get("elo_updated_at"),
@@ -69,6 +71,7 @@ class PlayerSnapshot:
             nickname=profile.get("nickname") or profile["player_id"],
             avatar=profile.get("avatar") or None,
             country=profile.get("country"),
+            steam_id=str(cs2.get("game_player_id") or profile.get("steam_id_64") or "") or None,
             level=_opt_int(cs2.get("skill_level")) or None,
             elo=_opt_int(cs2.get("faceit_elo")),
             faceit_url=url.replace("{lang}", "en") if url else None,
@@ -169,21 +172,51 @@ class TrackedResult:
     elo_after: int | None = None
     elo_delta: int | None = None
     awards: list[str] = field(default_factory=list)
+    # --- extended (schema v3) ---
+    entry_count: int | None = None
+    entry_wins: int | None = None
+    first_kills: int | None = None
+    c1v1: int | None = None
+    w1v1: int | None = None
+    c1v2: int | None = None
+    w1v2: int | None = None
+    clutch_kills: int | None = None
+    damage: int | None = None
+    utility_damage: int | None = None
+    enemies_flashed: int | None = None
+    flash_count: int | None = None
+    flash_successes: int | None = None
+    utility_count: int | None = None
+    sniper_kills: int | None = None
+    double_kills: int | None = None
+
+    EXTENDED_FIELDS = (
+        "entry_count", "entry_wins", "first_kills", "c1v1", "w1v1", "c1v2", "w1v2", "clutch_kills",
+        "damage", "utility_damage", "enemies_flashed", "flash_count", "flash_successes",
+        "utility_count", "sniper_kills", "double_kills",
+    )
 
     @property
     def enriched(self) -> bool:
         return self.deaths is not None
 
     @property
+    def extended(self) -> bool:
+        return self.entry_count is not None
+
+    @property
     def won(self) -> bool | None:
         return None if self.result is None else self.result == 1
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("EXTENDED_FIELDS", None)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "TrackedResult":
         return cls(
+            **{k: _opt_int(d.get(k)) for k in cls.EXTENDED_FIELDS},
             nickname=d.get("nickname") or "?",
             kills=_int(d.get("kills")),
             shamed=bool(d.get("shamed")),
@@ -368,6 +401,22 @@ def parse_match(
                     triple=_int(_stat(ps, "Triple Kills")),
                     quadro=_int(_stat(ps, "Quadro Kills")),
                     penta=_int(_stat(ps, "Penta Kills")),
+                    entry_count=_int(_stat(ps, "Entry Count")),
+                    entry_wins=_int(_stat(ps, "Entry Wins")),
+                    first_kills=_int(_stat(ps, "First Kills")),
+                    c1v1=_int(_stat(ps, "1v1Count")),
+                    w1v1=_int(_stat(ps, "1v1Wins")),
+                    c1v2=_int(_stat(ps, "1v2Count")),
+                    w1v2=_int(_stat(ps, "1v2Wins")),
+                    clutch_kills=_int(_stat(ps, "Clutch Kills")),
+                    damage=_int(_stat(ps, "Damage")),
+                    utility_damage=_int(_stat(ps, "Utility Damage")),
+                    enemies_flashed=_int(_stat(ps, "Enemies Flashed")),
+                    flash_count=_int(_stat(ps, "Flash Count")),
+                    flash_successes=_int(_stat(ps, "Flash Successes")),
+                    utility_count=_int(_stat(ps, "Utility Count")),
+                    sniper_kills=_int(_stat(ps, "Sniper Kills")),
+                    double_kills=_int(_stat(ps, "Double Kills")),
                 )
         teams.append(team_rec)
 
