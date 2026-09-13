@@ -289,10 +289,26 @@ class Poller:
                 del st.pending_postmortems[mid]
                 st.mark_dirty()
                 continue
-            if not await self.app.leetify.match_ratings(mid):
+            legacy = not info.get("message_id")  # queued by an older build that waited for Leetify before posting
+            if not legacy and not await self.app.leetify.match_ratings(mid):
                 continue
             fresh = await self.app.fetch_record(mid, finished_at=finished_at, with_details=True)
             if fresh is None:
+                continue
+            if legacy:
+                cached = st.match_outcomes.get(mid)
+                if cached:
+                    for pid, r in fresh.players.items():
+                        if pid in cached.players:
+                            r.elo_after, r.elo_delta, r.awards = cached.players[pid].elo_after, cached.players[pid].elo_delta, cached.players[pid].awards
+                self.app.detect(fresh)
+                st.put_match(fresh)
+                del st.pending_postmortems[mid]
+                try:
+                    await self.post_postmortem(fresh)  # posts now; re-queues itself for the Leetify upgrade if needed
+                except discord.HTTPException as exc:
+                    log.error("Failed to post queued post-mortem for %s: %s", mid, exc)
+                st.mark_dirty()
                 continue
             cached = st.match_outcomes.get(mid)
             if cached:

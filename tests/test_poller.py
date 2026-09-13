@@ -325,3 +325,23 @@ async def test_postmortem_with_leetify_at_post_time_is_not_queued(fixtures, trac
 def _record_for(fixtures, tracked, suffix):
     from shamebot.models import parse_match
     return parse_match("x", fixtures["stats" + suffix], fixtures["details" + suffix], tracked, kill_threshold=10)
+
+
+@pytest.mark.asyncio
+async def test_legacy_pending_postmortem_is_posted(fixtures, tracked, tmp_path, env):
+    """Entries queued by the old wait-for-Leetify build (no message id) get posted immediately."""
+    app, fake = _app(fixtures, tracked, tmp_path)
+    app.settings.leetify_enabled = True
+    app.settings.postmortem_auto = True
+    pm = FakeChannel()
+    poller = Poller(FakeClient(pm), app)
+    poller.channel = pm
+    app.leetify = _FakeLeetify(None)
+    await app.refresh_all_snapshots()
+    t0 = app.state.snapshot(next(iter(tracked))).elo_ts
+    mid = fake.add_match("_shame", t0 + 10)
+    await poller.poll_once(allow_post=False)  # cached + processed, nothing posted
+    app.state.pending_postmortems[mid] = {"finished_at": t0 + 10}  # old format
+    assert await poller.upgrade_postmortems() == 0
+    assert [f[0].filename for _, f, _ in pm.posts] == ["postmortem.png"]
+    assert app.state.pending_postmortems[mid]["message_id"]  # re-queued for the Leetify upgrade
