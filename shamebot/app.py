@@ -11,6 +11,7 @@ from .config import Settings
 from .compare import CompareResult, build_categories, score, write_verdict
 from .faceit import FaceitClient
 from .leetify import LeetifyClient, LeetifyProfile
+from .blame import compute_blame, compute_carry
 from .models import MatchRecord, PlayerSnapshot, parse_match
 from .render import theme as T
 from .render.compare_card import CompareSide, render_compare
@@ -18,7 +19,7 @@ from .render.leaderboard_card import LeaderRow, render_leaderboard
 from .render.profile_card import ProfileData, render_profile
 from .render.shame_card import HeroPlayer, render_match_card
 from .roasts import RoastContext, RoastEngine
-from .rules import Detection, PostKind, Thresholds, detect
+from .rules import Detection, PostKind, Thresholds, detect, grey_zone_reasons
 from .state import State
 from .stats import PlayerAggregate, aggregate, elo_change, group_by_player, hall_of_shame, per_map
 
@@ -40,7 +41,7 @@ class App:
         self.settings = settings
         self.state = State(settings.state_file)
         self.faceit = FaceitClient(settings.faceit_api_key)
-        self.roasts = RoastEngine(level=settings.roast_level, custom_file=settings.custom_roasts_file)
+        self.roasts = RoastEngine(level=settings.roast_level, custom_file=settings.custom_roasts_file, recent=self.state.recent_roasts)
         self.leetify = LeetifyClient(settings.leetify_api_key or None, enabled=settings.leetify_enabled)
         self.tracked: dict[str, str] = {}  # player_id -> nickname
         self.backfill_in_progress = False
@@ -49,7 +50,33 @@ class App:
             redemption_kills=settings.redemption_kills,
             glory_kills=settings.glory_kills,
             glory_enabled=settings.glory_posts_enabled,
+            fame_carry_kills=settings.fame_carry_kills,
+            fame_carry_kd=settings.fame_carry_kd,
+            fame_carry_adr=settings.fame_carry_adr,
+            fame_carry_share=settings.fame_carry_share,
+            liability_enabled=settings.liability_posts_enabled,
+            liability_blame_share=settings.liability_blame_share,
+            liability_close_win_margin=settings.liability_close_win_margin,
+            liability_max_kd=settings.liability_max_kd,
+            grey_zone=settings.shame_grey_zone,
+            grey_kd=settings.shame_grey_kd,
+            grey_adr=settings.shame_grey_adr,
+            grey_blame_share=settings.shame_grey_blame_share,
+            grey_min_signals=settings.shame_grey_min_signals,
+            grey_kd_hard=settings.shame_grey_kd_hard,
+            grey_adr_hard=settings.shame_grey_adr_hard,
         )
+
+    def arm_grey_zone(self) -> None:
+        """Grey-zone shames apply from the first run with the feature, never to older cached games."""
+        if self.settings.shame_grey_retroactive:
+            self.thresholds.grey_since = None
+            return
+        if self.state.grey_zone_since is None:
+            self.state.grey_zone_since = int(time.time())
+            self.state.mark_dirty()
+            log.info("Grey-zone shame rule enabled from now on (grey_zone_since=%d).", self.state.grey_zone_since)
+        self.thresholds.grey_since = self.state.grey_zone_since
 
     # ------------------------------------------------------------ players
 
@@ -158,6 +185,8 @@ class App:
         parts = [f"{agg.shame_count}/{agg.games} on the wall ({agg.shame_rate}%)"]
         if agg.current_shame_streak:
             parts.append(f"streak {agg.current_shame_streak}")
+        if agg.liability_count:
+            parts.append(f"{agg.liability_count} liabilit{'y' if agg.liability_count == 1 else 'ies'}")
         if agg.worst_kills is not None:
             parts.append(f"worst {agg.worst_kills} K")
         parts.append(agg.title)
@@ -176,6 +205,8 @@ class App:
         level = next((row.level for t in record.teams for row in t.players if row.pid == pid), None)
         streak = self.streak_before(pid, record.finished_at) + (1 if r.shamed else 0)
         ctx = RoastContext.from_match(record, r, streak=streak)
+        if "bait_job" in r.awards:
+            ctx.grey_reasons = ", ".join(grey_zone_reasons(record, pid, self.thresholds))
         if kind is PostKind.SHAME:
             line = self.roasts.roast(ctx, seed=record.match_id)
         elif kind is PostKind.REDEMPTION:
@@ -183,6 +214,8 @@ class App:
             line = self.roasts.redemption(ctx, seed=record.match_id)
         elif kind is PostKind.GLORY:
             line = self.roasts.glory(ctx, seed=record.match_id, ace=(r.penta or 0) >= 1)
+        elif kind is PostKind.LIABILITY:
+            line = self.roasts.liability(ctx, seed=record.match_id, won=r.result == 1, kill_threshold=self.thresholds.kill_threshold)
         else:
             line = ""
         return HeroPlayer(
@@ -197,16 +230,27 @@ class App:
             record_line=self.record_line(agg),
             avg_kd=agg.avg_kd,
             avg_adr=agg.avg_adr,
+            blame=(compute_carry(record, pid) if kind is PostKind.GLORY else compute_blame(record, pid) if kind in (PostKind.SHAME, PostKind.LIABILITY) else None),
         )
 
     def headline_for(self, kind: PostKind, heroes: list[HeroPlayer]) -> str:
         pal = self.palette_for(kind)
+        if kind is PostKind.SHAME and all("bait_job" in h.result.awards for h in heroes):
+            return f"{pal.headline} — GREY ZONE"
         if kind is PostKind.SHAME and len(heroes) == 2:
             return f"{pal.headline} — DOUBLE FEATURE"
         if kind is PostKind.SHAME and len(heroes) >= 3:
             return f"{pal.headline} — TRIPLE THREAT"
         if kind is PostKind.GLORY and any((h.result.penta or 0) >= 1 for h in heroes):
             return f"{pal.headline} — ACE"
+        if kind is PostKind.GLORY and all(h.result.kills >= self.thresholds.glory_kills for h in heroes):
+            return f"{pal.headline} — {max(h.result.kills for h in heroes)} BOMB"
+        if kind is PostKind.GLORY and all("hard_carry" in h.result.awards for h in heroes):
+            return f"{pal.headline} — HARD CARRY"
+        if kind is PostKind.GLORY and all("wasted" in h.result.awards for h in heroes):
+            return f"{pal.headline} — WASTED"
+        if kind is PostKind.LIABILITY and all(h.result.result == 1 for h in heroes):
+            return f"{pal.headline} — CARRIED"
         return pal.headline
 
     @staticmethod
@@ -215,6 +259,7 @@ class App:
             PostKind.SHAME: T.SHAME,
             PostKind.REDEMPTION: T.REDEMPTION,
             PostKind.GLORY: T.GLORY,
+            PostKind.LIABILITY: T.LIABILITY,
         }.get(kind, T.NEUTRAL)
 
     async def render_post(self, record: MatchRecord, pids: list[str], kind: PostKind | None) -> RenderedPost:

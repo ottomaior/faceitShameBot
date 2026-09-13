@@ -88,7 +88,15 @@ GLORY = Palette(
     accent_dark=(120, 85, 0),
     accent_soft=(70, 52, 10),
     stamp="CERTIFIED PROBLEM",
-    headline="HIGHLIGHT",
+    headline="WALL OF FAME",
+)
+LIABILITY = Palette(
+    name="liability",
+    accent=(168, 176, 196),
+    accent_dark=(58, 62, 78),
+    accent_soft=(44, 47, 60),
+    stamp="LIABILITY",
+    headline="THE LIABILITY",
 )
 NEUTRAL = Palette(
     name="neutral",
@@ -99,7 +107,7 @@ NEUTRAL = Palette(
     headline="LAST MATCH",
 )
 
-PALETTES = {p.name: p for p in (SHAME, REDEMPTION, GLORY, NEUTRAL)}
+PALETTES = {p.name: p for p in (SHAME, REDEMPTION, GLORY, LIABILITY, NEUTRAL)}
 
 BG: RGB = (13, 14, 18)
 PANEL: RGB = (24, 26, 33)

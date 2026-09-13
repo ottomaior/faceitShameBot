@@ -226,9 +226,9 @@ def form_strip(
     gap: int = 5,
     oldest_first: bool = True,
 ) -> float:
-    """Squares for the last N games: S=shamed (red), G=glory (gold), C=clean (grey). Returns width."""
+    """Squares for the last N games: S=shamed (red), G=glory (gold), B=liability (slate), C=clean (grey). Returns width."""
     seq = list(reversed(form)) if oldest_first else list(form)
-    colors = {"S": T.LOSS, "G": T.GLORY.accent, "C": (110, 114, 130), "W": T.WIN, "L": T.LOSS, "?": (70, 72, 84)}
+    colors = {"S": T.LOSS, "G": T.GLORY.accent, "B": T.LIABILITY.accent, "C": (110, 114, 130), "W": T.WIN, "L": T.LOSS, "?": (70, 72, 84)}
     for i, code in enumerate(seq):
         cx = x + i * (cell + gap)
         rounded(draw, (cx, y, cx + cell, y + cell), 4, colors.get(code, T.DIM))

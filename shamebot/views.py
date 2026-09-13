@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-KIND_EMOJI = {PostKind.SHAME: "🧱", PostKind.REDEMPTION: "🌅", PostKind.GLORY: "🏆"}
+KIND_EMOJI = {PostKind.SHAME: "🧱", PostKind.REDEMPTION: "🌅", PostKind.GLORY: "🏆", PostKind.LIABILITY: "🪨"}
 MENTION_USERS = discord.AllowedMentions(users=True, roles=False, everyone=False)
 NO_MENTIONS = discord.AllowedMentions.none()
 
@@ -102,6 +102,10 @@ def _hero_line(app: "App", post: "RenderedPost", hero) -> str:
         bits.append(f"**{hero.elo_delta:+d} ELO**")
     elif hero.elo is not None:
         bits.append(f"{hero.elo} ELO")
+    if getattr(hero, "blame", None) is not None and post.kind in (PostKind.SHAME, PostKind.LIABILITY):
+        bits.append(f"🔻 {hero.blame.summary()}")
+    elif getattr(hero, "blame", None) is not None and post.kind is PostKind.GLORY:
+        bits.append(f"🔺 {hero.blame.summary()}")
     return " · ".join(bits)
 
 
@@ -157,7 +161,7 @@ def match_view(
         row = ui.ActionRow()
         if rec.faceit_url:
             row.add_item(ui.Button(label="Open on FaceIT", url=rec.faceit_url, emoji="🔗"))
-        if post.kind is PostKind.SHAME:
+        if post.kind in (PostKind.SHAME, PostKind.LIABILITY):
             for hero in post.heroes[:3]:
                 label = "Excuse me" if len(post.heroes) == 1 else f"Excuse {hero.result.nickname}"[:80]
                 row.add_item(ExcuseButton(rec.match_id, hero.pid, label=label))
@@ -274,7 +278,7 @@ def help_text(app: "App") -> list[str]:
         f"🧱 **Wall of Shame** — fewer than **{s.kill_threshold} kills** → a card with the full scoreboard, "
         "your stats, a roast, award badges and your ELO change. Two of you in the same game = **Double Feature**.\n"
         f"🌅 **Redemption Arc** — 2+ shames in a row, then **{s.redemption_kills}+ kills**.\n"
-        + (f"🏆 **Highlight** — **{s.glory_kills}+ kills**{ace} (15+ kills).\n" if s.glory_posts_enabled else "")
+        + (f"🏆 **Wall of Fame** — **{s.glory_kills}+ kills**{ace} (15+ kills), or a hard carry: top-fragger of the lobby, best on the team, {s.fame_carry_kills}+ kills with K/D ≥ {s.fame_carry_kd} or ADR ≥ {s.fame_carry_adr:.0f}.\n" if s.glory_posts_enabled else "")
         + ("📅 **Weekly digest** — leaderboard, bot of the week, biggest ELO loss.\n" if s.weekly_digest_enabled else "")
     )
     buttons = (

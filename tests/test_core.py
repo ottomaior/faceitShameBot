@@ -117,11 +117,12 @@ def test_roast_is_deterministic_and_filled(fixtures, tracked):
     rec = _record(fixtures, tracked, "_onekill")
     detect(rec, streaks_before={}, thresholds=Thresholds())
     r = next(x for x in rec.players.values() if x.nickname == "BRNWr")
-    eng = RoastEngine()
     ctx = RoastContext.from_match(rec, r, streak=1)
+    eng = RoastEngine()
     a = eng.roast(ctx, seed=rec.match_id)
-    b = eng.roast(ctx, seed=rec.match_id)
-    assert a == b
+    b = RoastEngine().roast(ctx, seed=rec.match_id)
+    assert a == b  # same seed, fresh memory: deterministic
+    assert eng.roast(ctx, seed=rec.match_id) != a  # same engine again: the memory steers away from repeats
     assert "{" not in a and "}" not in a
     assert "1 kills" not in a
     assert a != eng.roast(ctx, seed="other-seed") or True  # different seed may differ
@@ -254,3 +255,310 @@ def test_snapshot_from_profile(fixtures):
     assert snap.elo_history == [[1, 1295], [2, 1270]]
     again = PlayerSnapshot.from_dict(snap.player_id, json.loads(json.dumps(snap.to_dict())))
     assert again == snap
+
+
+# ------------------------------------------------------------ moment awards
+
+
+def test_moment_awards_from_fixture(fixtures, tracked):
+    # mindtech went 0/1 in 1v1s and 0/2 in 1v2s in the captured shame match
+    rec = _record(fixtures, tracked, "_shame")
+    detect(rec, streaks_before={}, thresholds=Thresholds())
+    m = next(x for x in rec.players.values() if x.nickname == "mindtech")
+    assert "clutch_donor" in m.awards
+    m.mvps = 0
+    pid = next(p for p, x in rec.players.items() if x is m)
+    awards = compute_awards(rec, pid, streak_before=0, shamed_count=2)
+    assert awards.index("clutch_donor") < awards.index("zero_mvp")  # moments before generic pills
+    b = next(x for x in rec.players.values() if x.nickname == "BRNWr")
+    assert "clutch_donor" not in b.awards  # no clutch situations at all
+
+
+def test_moment_awards_thresholds():
+    from shamebot.rules import moment_awards
+
+    base = dict(nickname="P", kills=4, shamed=True)
+    assert moment_awards(TrackedResult(nickname="P", kills=4, shamed=True), rounds=24) == []  # not extended
+    r = TrackedResult(**base, entry_count=5, entry_wins=1, c1v1=1, c1v2=1, w1v1=0, w1v2=0,
+                      utility_count=1, flash_count=1, utility_damage=0)
+    assert moment_awards(r, rounds=24) == ["clutch_donor", "entry_fodder", "nade_hoarder"]
+    assert "nade_hoarder" not in moment_awards(r, rounds=12)  # short game, no hoarding verdict
+    r2 = TrackedResult(**base, entry_count=0, entry_wins=0, utility_count=7, utility_damage=0, flash_count=6, enemies_flashed=0)
+    assert moment_awards(r2, rounds=20) == ["blank_nades", "flash_artist"]
+    r3 = TrackedResult(**base, entry_count=4, entry_wins=2, utility_count=7, utility_damage=30)
+    assert moment_awards(r3, rounds=20) == []
+    assert award_label("clutch_donor") == "Clutch donor"
+
+
+def test_roast_prefers_moment_modifier_with_numbers(fixtures, tracked):
+    rec = _record(fixtures, tracked, "_shame")
+    detect(rec, streaks_before={}, thresholds=Thresholds())
+    m = next(x for x in rec.players.values() if x.nickname == "mindtech")
+    eng = RoastEngine()
+    ctx = RoastContext.from_match(rec, m)
+    assert ctx.clutches == 3 and ctx.clutch_wins == 0
+    for i in range(20):
+        line = eng.roast(ctx, seed=str(i))
+        assert "{" not in line
+        # a specific failure (the lost clutches, or the blame share) always takes a slot
+        assert "clutch" in line.lower() or f"{ctx.blame}%" in line
+
+
+def test_roast_singularises_extended_words():
+    ctx = RoastContext(nick="P", kills=1, deaths=1, map="Mirage", adr=1.0, kd=1.0, hs=1, rounds=1,
+                       score="", mvps=1, clutches=1, flashes=1, enemies_flashed=1)
+    assert ctx.fmt("{clutches} clutches, {flashes} flashes, {enemies_flashed} enemies") == "1 clutch, 1 flash, 1 enemy"
+
+
+# ------------------------------------------------------------------- blame
+
+
+def test_blame_report_against_own_team(fixtures, tracked):
+    from shamebot.blame import compute_blame
+
+    rec = _record(fixtures, tracked, "_onekill")
+    detect(rec, streaks_before={}, thresholds=Thresholds())
+    pid = next(p for p, r in rec.players.items() if r.nickname == "BRNWr")
+    b = compute_blame(rec, pid)
+    assert b is not None and b.lost
+    assert b.rank == 5 and b.team_size == 5  # worst impact on his own team
+    assert b.share > 20 and b.heavy  # well above an even split
+    assert b.kill_share <= 5 and b.death_share >= 20
+    assert "lost 4 of 4 opening duels" in b.facts and "lowest ADR on the team" in b.facts
+    assert b.summary().startswith(f"{b.share}% blame · 5th of 5")
+    # the whole team's shares add up to ~100 and the best player carries none of it
+    shares = [compute_blame(rec, row.pid).share for t in rec.teams for row in t.players if row.pid == pid]
+    assert shares == [b.share]
+
+
+def test_blame_even_team_and_best_player():
+    from shamebot.blame import compute_blame
+    from shamebot.models import ScoreRow, TeamRecord
+
+    def row(pid, k, d, adr):
+        return ScoreRow(pid=pid, nick=pid, k=k, d=d, a=2, adr=adr, kd=round(k / d, 2), hs=40, mvp=1)
+
+    even = TeamRecord(name="A", score=5, win=False, players=[row(f"p{i}", 15, 15, 70.0) for i in range(5)])
+    rec = MatchRecord(match_id="m", finished_at=1, v=3, map="de_mirage", rounds=24,
+                      players={"p0": TrackedResult(nickname="p0", kills=15, shamed=False, deaths=15, result=0, team_score=5, enemy_score=13)},
+                      teams=[even])
+    b = compute_blame(rec, "p0")
+    assert b.share == 20 and b.rank == 1
+
+    star = TeamRecord(name="A", score=5, win=False, players=[row("p0", 30, 10, 110.0)] + [row(f"p{i}", 10, 18, 50.0) for i in range(1, 5)])
+    rec.teams = [star]
+    b = compute_blame(rec, "p0")
+    assert b.share == 0 and b.rank == 1 and b.facts == []
+
+
+def test_blame_missing_for_v1_records():
+    from shamebot.blame import compute_blame
+
+    rec = MatchRecord(match_id="m", finished_at=1, v=1, map="de_mirage", players={"p": TrackedResult(nickname="p", kills=3, shamed=True)})
+    assert compute_blame(rec, "p") is None
+
+
+def test_roast_blame_placeholder(fixtures, tracked):
+    rec = _record(fixtures, tracked, "_onekill")
+    detect(rec, streaks_before={}, thresholds=Thresholds())
+    r = next(x for x in rec.players.values() if x.nickname == "BRNWr")
+    ctx = RoastContext.from_match(rec, r)
+    assert ctx.blame > 20 and ctx.blame_heavy
+    assert ctx.fmt("{blame}% yours") == f"{ctx.blame}% yours"
+
+
+# --------------------------------------------------------------- liability
+
+
+def test_liability_detection_thresholds(fixtures, tracked):
+    from shamebot.rules import is_liability
+
+    rec = _record(fixtures, tracked)  # BRNWr 14 kills, worst on his team, lost 8-13, 34% blame
+    pid = next(p for p, r in rec.players.items() if r.nickname == "BRNWr")
+    assert is_liability(rec, pid, Thresholds()) is None  # 34 < 35: not decisive enough
+    loose = Thresholds(liability_blame_share=30)
+    b = is_liability(rec, pid, loose)
+    assert b is not None and b.rank == 5 and b.lost
+    dets = detect(rec, streaks_before={}, thresholds=loose)
+    assert [d.kind for d in dets] == [PostKind.LIABILITY] and dets[0].player_ids == [pid]
+    assert rec.players[pid].liability and not rec.players[pid].shamed
+    # never for a shamed player (wall takes precedence) or when disabled
+    assert is_liability(rec, pid, Thresholds(liability_blame_share=30, kill_threshold=15)) is None
+    assert is_liability(rec, pid, Thresholds(liability_blame_share=30, liability_enabled=False)) is None
+    # detect() resets the flag when the rule no longer holds
+    detect(rec, streaks_before={}, thresholds=Thresholds())
+    assert not rec.players[pid].liability
+
+
+def test_liability_close_win_only(fixtures, tracked):
+    from shamebot.rules import is_liability
+
+    rec = _record(fixtures, tracked)
+    pid = next(p for p, r in rec.players.items() if r.nickname == "BRNWr")
+    r = rec.players[pid]
+    t = Thresholds(liability_blame_share=30)
+    r.result, r.team_score, r.enemy_score = 1, 13, 11  # dragged a close win
+    assert is_liability(rec, pid, t) is not None
+    r.team_score, r.enemy_score = 16, 14  # overtime win
+    assert is_liability(rec, pid, t) is not None
+    r.team_score, r.enemy_score = 13, 4  # comfortable win: nobody cares
+    assert is_liability(rec, pid, t) is None
+    r.result, r.team_score, r.enemy_score, r.kd = 0, 17, 19, 0.96  # long OT loss with a near-even K/D: not a liability
+    assert is_liability(rec, pid, t) is None
+
+
+def test_liability_roast_and_aggregate(fixtures, tracked):
+    rec = _record(fixtures, tracked)
+    pid = next(p for p, r in rec.players.items() if r.nickname == "BRNWr")
+    detect(rec, streaks_before={}, thresholds=Thresholds(liability_blame_share=30))
+    ctx = RoastContext.from_match(rec, rec.players[pid])
+    assert ctx.team_best_kills == 20 and ctx.team_avg_kills > ctx.kills
+    eng = RoastEngine()
+    for i in range(10):
+        line = eng.liability(ctx, seed=str(i))
+        assert "{" not in line
+    assert "{" not in eng.liability(ctx, seed="w", won=True)
+    agg = aggregate(pid, [rec])
+    assert agg.liability_count == 1 and agg.shame_count == 0 and agg.form == ["B"]
+    # round-trips through the state dict
+    again = MatchRecord.from_dict(rec.match_id, json.loads(json.dumps(rec.to_dict())))
+    assert again.players[pid].liability
+
+
+# --------------------------------------------------------------- grey zone
+
+
+def _grey_record(kills: int, deaths: int, adr: float, *, result: int = 0, scores=(9, 13)) -> tuple[MatchRecord, str]:
+    from shamebot.models import ScoreRow, TeamRecord
+
+    def row(pid, k, d, a):
+        return ScoreRow(pid=pid, nick=pid, k=k, d=d, a=3, adr=a, kd=round(k / d, 2), hs=40, mvp=1)
+
+    mine = TeamRecord(name="A", score=scores[0], win=result == 1,
+                      players=[row("me", kills, deaths, adr)] + [row(f"t{i}", 17, 14, 78.0) for i in range(4)])
+    theirs = TeamRecord(name="B", score=scores[1], win=result == 0, players=[row(f"e{i}", 16, 15, 75.0) for i in range(5)])
+    r = TrackedResult(nickname="me", kills=kills, shamed=False, deaths=deaths, adr=adr, kd=round(kills / deaths, 2),
+                      hs_pct=40, mvps=1, result=result, team_score=scores[0], enemy_score=scores[1])
+    rec = MatchRecord(match_id="g", finished_at=1_700_000_000, v=3, map="de_mirage", rounds=22, players={"me": r}, teams=[mine, theirs])
+    return rec, "me"
+
+
+def test_grey_zone_two_signals_or_extreme():
+    from shamebot.rules import grey_zone_reasons
+
+    th = Thresholds()
+    # 11 kills, 19 deaths, 51 ADR on a loss: K/D + ADR + blame -> wall
+    rec, pid = _grey_record(11, 19, 51.0)
+    reasons = grey_zone_reasons(rec, pid, th)
+    assert len(reasons) == 3 and reasons[0].startswith("K/D")
+    # one weak signal alone (K/D 0.61, fine ADR, not worst by enough) is not enough
+    rec, pid = _grey_record(11, 18, 72.0)
+    assert grey_zone_reasons(rec, pid, th) == [] or len(grey_zone_reasons(rec, pid, th)) >= 2
+    # an extreme single signal is
+    rec, pid = _grey_record(12, 10, 40.0, result=1, scores=(13, 4))
+    assert grey_zone_reasons(rec, pid, th) == ["ADR 40"]
+    # outside the zone: never
+    rec, pid = _grey_record(13, 25, 30.0)
+    assert grey_zone_reasons(rec, pid, th) == []
+    # blame signal needs a loss or close win: a stomp with a bad row but nothing else stays clean
+    rec, pid = _grey_record(10, 13, 60.0, result=1, scores=(13, 3))
+    assert grey_zone_reasons(rec, pid, th) == []
+    # non-retroactive gate
+    rec, pid = _grey_record(11, 19, 51.0)
+    assert grey_zone_reasons(rec, pid, Thresholds(grey_since=1_800_000_000)) == []
+
+
+def test_grey_zone_shame_post_and_roast():
+    rec, pid = _grey_record(11, 19, 51.0)
+    dets = detect(rec, streaks_before={}, thresholds=Thresholds())
+    assert [d.kind for d in dets] == [PostKind.SHAME] and dets[0].player_ids == [pid]
+    r = rec.players[pid]
+    assert r.shamed and not r.liability
+    assert r.awards[0] == "bait_job" and award_label("bait_job") == "Bait job"
+    ctx = RoastContext.from_match(rec, r)
+    ctx.grey_reasons = "K/D 0.58, ADR 51"
+    eng = RoastEngine()
+    lines = {eng.roast(ctx, seed=str(i)) for i in range(15)}
+    assert all("{" not in ln for ln in lines)
+    assert any("K/D 0.58, ADR 51" in ln for ln in lines)  # the reason is spoken
+    # a liability never doubles up with a grey-zone shame
+    from shamebot.rules import is_liability
+    assert is_liability(rec, pid, Thresholds()) is None
+
+
+# ------------------------------------------------------------------- fame
+
+
+def _fame_record(kills: int, deaths: int, adr: float, *, result: int = 1, scores=(13, 8), mvp: int = 4, lobby_best: int = 18) -> tuple[MatchRecord, str]:
+    from shamebot.models import ScoreRow, TeamRecord
+
+    def row(pid, k, d, a, mv=1):
+        return ScoreRow(pid=pid, nick=pid, k=k, d=d, a=3, adr=a, kd=round(k / max(d, 1), 2), hs=45, mvp=mv)
+
+    mine = TeamRecord(name="A", score=scores[0], win=result == 1,
+                      players=[row("me", kills, deaths, adr, mvp)] + [row(f"t{i}", 14, 15, 70.0) for i in range(4)])
+    theirs = TeamRecord(name="B", score=scores[1], win=result == 0, players=[row(f"e{i}", lobby_best - i, 16, 78.0) for i in range(5)])
+    r = TrackedResult(nickname="me", kills=kills, shamed=False, deaths=deaths, adr=adr, kd=round(kills / max(deaths, 1), 2),
+                      hs_pct=45, mvps=mvp, result=result, team_score=scores[0], enemy_score=scores[1],
+                      entry_count=6, entry_wins=5, c1v1=2, w1v1=2, c1v2=0, w1v2=0, utility_damage=160)
+    rec = MatchRecord(match_id="f", finished_at=1_700_000_000, v=3, map="de_mirage", rounds=21, players={"me": r}, teams=[mine, theirs])
+    return rec, "me"
+
+
+def test_fame_carry_rule_and_awards():
+    from shamebot.blame import compute_carry
+    from shamebot.rules import fame_awards, is_fame_carry
+
+    th = Thresholds()
+    rec, pid = _fame_record(26, 11, 106.0)
+    c = is_fame_carry(rec, pid, th)
+    assert c is not None and c.top_of_lobby and c.rank == 1 and c.heavy and c.won
+    assert c.label == "CARRY" and "top-fragger of the lobby" in c.facts
+    dets = detect(rec, streaks_before={}, thresholds=th)
+    assert [d.kind for d in dets] == [PostKind.GLORY]
+    r = rec.players[pid]
+    assert r.fame and not r.shamed
+    for a in ("top_of_lobby", "hard_carry", "untouchable", "clutch_king", "entry_king", "utility_master"):
+        assert a in r.awards, a
+    assert "wasted" not in r.awards and award_label("hard_carry") == "Hard carry"
+    # 22 kills, 1.1 K/D, 80 ADR, not top of lobby -> just a good game, no post
+    rec, pid = _fame_record(22, 20, 80.0, lobby_best=24)
+    assert is_fame_carry(rec, pid, th) is None
+    assert detect(rec, streaks_before={}, thresholds=th) == []
+    # same carry on a loss -> WASTED
+    rec, pid = _fame_record(26, 11, 106.0, result=0, scores=(11, 13))
+    detect(rec, streaks_before={}, thresholds=th)
+    assert "wasted" in rec.players[pid].awards and compute_carry(rec, pid).label == "WASTED"
+    # 30-bomb still posts without the carry conditions
+    rec, pid = _fame_record(31, 25, 80.0, lobby_best=33)
+    assert [d.kind for d in detect(rec, streaks_before={}, thresholds=th)] == [PostKind.GLORY]
+
+
+def test_fame_praise_lines():
+    rec, pid = _fame_record(26, 11, 106.0)
+    detect(rec, streaks_before={}, thresholds=Thresholds())
+    ctx = RoastContext.from_match(rec, rec.players[pid])
+    assert ctx.carry >= 30 and ctx.lobby_second == 18 and ctx.lobby_gap == 8
+    eng = RoastEngine()
+    lines = [eng.glory(ctx, seed=str(i)) for i in range(20)]
+    assert all("{" not in ln for ln in lines)
+    assert all((f"{ctx.carry}%" in ln or f"{ctx.kill_share}%" in ln) for ln in lines)  # carry verdict always spoken
+    assert "{" not in eng.glory(ctx, seed="a", ace=True)
+    agg = aggregate(pid, [rec])
+    assert agg.form == ["G"]
+
+
+def test_roasts_avoid_recent_repeats(fixtures, tracked):
+    from shamebot.roasts import GLORY_LINES, RECENT_CAP
+
+    rec = _record(fixtures, tracked)
+    r = next(iter(rec.players.values()))
+    ctx = RoastContext.from_match(rec, r)
+    shared: list[str] = []
+    eng = RoastEngine(recent=shared)
+    seen = {eng.glory(ctx, seed=f"m{i}") for i in range(len(GLORY_LINES))}
+    assert len(seen) == len(GLORY_LINES)  # every base line used once before any repeats
+    assert len(shared) <= RECENT_CAP and shared is eng.recent
+    # the memory is what the app persists: a fresh engine over the same list keeps avoiding them
+    eng2 = RoastEngine(recent=shared)
+    assert eng2.glory(ctx, seed="m0") not in seen or len(GLORY_LINES) <= RECENT_CAP

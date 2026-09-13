@@ -54,6 +54,27 @@ class Settings:
     redemption_kills: int = _int("REDEMPTION_KILLS", "25")
     glory_posts_enabled: bool = _bool("GLORY_POSTS_ENABLED", "true")
     glory_kills: int = _int("GLORY_KILLS", "30")
+    # Wall of Fame carry rule: top-fragger of the lobby + best on the team + K/D or ADR floor, from this many kills
+    fame_carry_kills: int = _int("FAME_CARRY_KILLS", "20")
+    fame_carry_kd: float = float(os.getenv("FAME_CARRY_KD") or "1.5")
+    fame_carry_adr: float = float(os.getenv("FAME_CARRY_ADR") or "90")
+    fame_carry_share: int = _int("FAME_CARRY_SHARE", "28")
+    # "Liability" posts: >= KILL_THRESHOLD kills but the team's worst player by a wide margin on a loss / close win
+    liability_posts_enabled: bool = _bool("LIABILITY_POSTS_ENABLED", "true")
+    liability_blame_share: int = _int("LIABILITY_BLAME_SHARE", "35")
+    liability_close_win_margin: int = _int("LIABILITY_CLOSE_WIN_MARGIN", "3")
+    liability_max_kd: float = float(os.getenv("LIABILITY_MAX_KD") or "0.9")
+    # Grey zone: KILL_THRESHOLD..KILL_THRESHOLD+SHAME_GREY_ZONE-1 kills still shame when K/D, ADR or blame say so
+    shame_grey_zone: int = _int("SHAME_GREY_ZONE", "3")
+    shame_grey_kd: float = float(os.getenv("SHAME_GREY_KD") or "0.65")
+    shame_grey_adr: float = float(os.getenv("SHAME_GREY_ADR") or "55")
+    shame_grey_blame_share: int = _int("SHAME_GREY_BLAME_SHARE", "35")
+    shame_grey_min_signals: int = _int("SHAME_GREY_MIN_SIGNALS", "2")
+    shame_grey_kd_hard: float = float(os.getenv("SHAME_GREY_KD_HARD") or "0.5")
+    shame_grey_adr_hard: float = float(os.getenv("SHAME_GREY_ADR_HARD") or "45")
+    shame_grey_retroactive: bool = _bool("SHAME_GREY_RETROACTIVE", "false")
+    # Post liabilities for matches that finished before the feature was first enabled (dry runs / tests)
+    liability_retroactive: bool = _bool("LIABILITY_RETROACTIVE", "false")
 
     # --- polling / history --------------------------------------------------
     poll_interval_seconds: int = _int("POLL_INTERVAL_SECONDS", "300")

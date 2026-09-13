@@ -172,6 +172,8 @@ class TrackedResult:
     elo_after: int | None = None
     elo_delta: int | None = None
     awards: list[str] = field(default_factory=list)
+    liability: bool = False  # >= threshold kills but still the reason the team lost / barely won
+    fame: bool = False  # Wall of Fame post (30-bomb, ace or a carry)
     # --- extended (schema v3) ---
     entry_count: int | None = None
     entry_wins: int | None = None
@@ -236,6 +238,8 @@ class TrackedResult:
             elo_after=_opt_int(d.get("elo_after")),
             elo_delta=_opt_int(d.get("elo_delta")),
             awards=list(d.get("awards") or []),
+            liability=bool(d.get("liability")),
+            fame=bool(d.get("fame")),
         )
 
 

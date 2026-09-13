@@ -198,8 +198,9 @@ async def test_redemption_and_glory_posts(fixtures, tracked, tmp_path, env):
                 p["player_stats"]["Kills"] = "27"
     fake.fixtures = dict(fixtures, stats=big)
     fake.add_match("", t0 + 30)
-    assert await poller.poll_once(allow_post=True) == 1
-    view = channel.posts[-1][0]
+    # BRNWr's 27 kills make szucsu (12k, 0.71 K/D on a loss) the team's liability -> 2 posts
+    assert await poller.poll_once(allow_post=True) == 2
+    kinds = [files[0].filename.split("-")[0] for _, files, _ in channel.posts]
+    assert kinds == [PostKind.REDEMPTION.value, PostKind.LIABILITY.value]
+    view = channel.posts[0][0]
     assert "REDEMPTION" in json.dumps(view.to_components())
-    assert app.detect  # rules wired
-    assert PostKind.REDEMPTION.value in channel.posts[-1][1][0].filename

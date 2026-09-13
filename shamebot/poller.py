@@ -37,6 +37,7 @@ class Poller:
         self.channel = await self.get_shame_channel()
         if self.channel is None:
             return
+        self.app.arm_grey_zone()
         await self.app.refresh_all_snapshots()
         await self.backfill()
         await self.startup_scan()
@@ -169,6 +170,8 @@ class Poller:
                 st.put_match(record)
                 if allow_post:
                     for det in detections:
+                        if det.kind is PostKind.LIABILITY and not self._liability_live(record.finished_at):
+                            continue
                         try:
                             await self.post(det)
                             posted += 1
@@ -178,6 +181,17 @@ class Poller:
                 await asyncio.sleep(1)
             st.flush()
             return posted
+
+    def _liability_live(self, finished_at: int | None) -> bool:
+        """Liability posts start from the moment the feature is first enabled, never retroactively."""
+        st = self.app.state
+        if self.app.settings.liability_retroactive:
+            return True
+        if st.liability_since is None:
+            st.liability_since = int(time.time())
+            st.mark_dirty()
+            log.info("Liability posts enabled from now on (liability_since=%d).", st.liability_since)
+        return (finished_at or 0) >= st.liability_since
 
     async def post(self, det: Detection) -> None:
         assert self.channel is not None

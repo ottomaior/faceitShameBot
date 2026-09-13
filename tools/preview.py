@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from shamebot.blame import compute_blame  # noqa: E402
 from shamebot.models import MatchRecord, parse_match  # noqa: E402
 from shamebot.render import theme as T  # noqa: E402
 from shamebot.render.shame_card import HeroPlayer, render_match_card  # noqa: E402
@@ -81,6 +82,7 @@ def hero_for(rec: MatchRecord, pid: str, details: dict, elos: dict[str, int], *,
         record_line=record_line,
         avg_kd=0.92,
         avg_adr=68.0,
+        blame=compute_blame(rec, pid) if r.shamed else None,
     )
 
 

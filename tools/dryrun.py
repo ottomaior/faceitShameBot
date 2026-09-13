@@ -22,6 +22,8 @@ os.environ.setdefault("DISCORD_TOKEN", "dry")
 os.environ.setdefault("SHAME_CHANNEL_ID", "1")
 os.environ["STATE_FILE"] = str(OUT / "state.json")
 os.environ["STATS_BACKFILL_ON_STARTUP"] = "false"
+os.environ.setdefault("LIABILITY_RETROACTIVE", "true")  # scratch state: show liabilities in the window too
+os.environ.setdefault("SHAME_GREY_RETROACTIVE", "true")
 os.environ["POST_HISTORY_LIMIT"] = sys.argv[1] if len(sys.argv) > 1 else "10"
 
 from shamebot.app import App  # noqa: E402
@@ -96,7 +98,7 @@ async def main() -> None:
     for pid, snap in st.players.items():
         print(f"  {snap.nickname:<12} lvl {snap.level} elo {snap.elo} history {len(snap.elo_history)}")
     for a in app.aggregates(scope="recent"):
-        print(f"  {a.nickname:<12} games {a.games} shames {a.shame_count} ({a.shame_rate}%) streak {a.current_shame_streak} title {a.title} kd {a.avg_kd} adr {a.avg_adr} wr {a.win_rate}")
+        print(f"  {a.nickname:<12} games {a.games} shames {a.shame_count} ({a.shame_rate}%) liabilities {a.liability_count} streak {a.current_shame_streak} title {a.title} kd {a.avg_kd} adr {a.avg_adr} wr {a.win_rate}")
     st.flush()
     await app.close()
 

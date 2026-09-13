@@ -40,6 +40,7 @@ class PlayerAggregate:
     games: int = 0
     shame_count: int = 0
     shame_rate: int = 0
+    liability_count: int = 0  # >= threshold kills, still the team's decisive worst (rules.is_liability)
     clean_games: int = 0
     clean_rate: int = 0
     current_shame_streak: int = 0
@@ -122,6 +123,8 @@ def aggregate(
         kills_all.append(r.kills)
         if agg.best_kills is None or r.kills > agg.best_kills:
             agg.best_kills, agg.best_match_id = r.kills, m.match_id
+        if r.liability:
+            agg.liability_count += 1
         if r.shamed:
             agg.shame_count += 1
             kills_shamed.append(r.kills)
@@ -159,7 +162,7 @@ def aggregate(
                 ext["flash_w"] += r.flash_successes or 0
                 ext["sniper"] += r.sniper_kills or 0
         if len(agg.form) < 10:
-            agg.form.append("S" if r.shamed else ("G" if r.kills >= glory_kills else "C"))
+            agg.form.append("S" if r.shamed else ("G" if r.fame or r.kills >= glory_kills else ("B" if r.liability else "C")))
             agg.form_wl.append("?" if r.result is None else ("W" if r.result == 1 else "L"))
 
     # streaks (records are newest first)

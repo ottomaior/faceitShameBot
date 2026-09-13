@@ -167,7 +167,7 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
                 app.state.put_match(fresh)
                 record = fresh
         r = record.players[pid]
-        kind = PostKind.SHAME if r.shamed else (PostKind.GLORY if r.kills >= s.glory_kills or (r.penta or 0) else None)
+        kind = PostKind.SHAME if r.shamed else (PostKind.GLORY if r.fame or r.kills >= s.glory_kills or (r.penta or 0) else (PostKind.LIABILITY if r.liability else None))
         post = await app.render_post(record, [pid], kind)
         post.headline = post.headline if kind else "LAST MATCH"
         view, files = match_view(app, post, mention_ids=None, buttons=True)
@@ -266,7 +266,7 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
 
     @tree.command(name="shametest", description="(admin) Render the full post for any match id, ignoring the threshold")
     @app_commands.describe(match_id="FaceIT match id (1-....)", kind="Which post style to render")
-    async def shametest(interaction: discord.Interaction, match_id: str, kind: Literal["shame", "redemption", "glory", "last"] = "shame") -> None:
+    async def shametest(interaction: discord.Interaction, match_id: str, kind: Literal["shame", "redemption", "glory", "liability", "last"] = "shame") -> None:
         if interaction.user.id not in s.admin_discord_ids:
             await interaction.response.send_message("Admins only (ADMIN_DISCORD_IDS).", ephemeral=True)
             return
@@ -276,11 +276,11 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
             await interaction.followup.send("Match not found, or no tracked player in it.")
             return
         pids = list(record.players)
-        post_kind = {"shame": PostKind.SHAME, "redemption": PostKind.REDEMPTION, "glory": PostKind.GLORY}.get(kind)
+        post_kind = {"shame": PostKind.SHAME, "redemption": PostKind.REDEMPTION, "glory": PostKind.GLORY, "liability": PostKind.LIABILITY}.get(kind)
         if post_kind is PostKind.SHAME:
             for pid in pids:
                 record.players[pid].shamed = True
-                record.players[pid].awards = compute_awards(record, pid, streak_before=app.streak_before(pid, record.finished_at), shamed_count=len(pids))
+                record.players[pid].awards = compute_awards(record, pid, streak_before=app.streak_before(pid, record.finished_at), shamed_count=len(pids), kill_threshold=app.thresholds.kill_threshold)
         post = await app.render_post(record, pids, post_kind)
         view, files = match_view(app, post, mention_ids=None, buttons=True)
         await interaction.followup.send(view=view, files=files, allowed_mentions=MENTION_USERS)

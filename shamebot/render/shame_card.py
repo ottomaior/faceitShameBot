@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image, ImageDraw
 
+from ..blame import BlameReport, CarryReport
 from ..models import MatchRecord, TrackedResult
 from ..rules import award_label
 from . import primitives as P
@@ -27,6 +28,48 @@ class HeroPlayer:
     record_line: str = ""  # "8/30 on the wall (27%) · streak 1"
     avg_kd: float | None = None
     avg_adr: float | None = None
+    blame: BlameReport | CarryReport | None = None  # contribution to the result vs. own teammates (blame or carry)
+
+
+BLAME_STRIP_H = 46  # extra hero height when any hero carries a blame report (single layout)
+BLAME_STRIP_H_COMPACT = 66  # two-up panels put the facts on a second line
+
+
+def _blame_strip(draw: ImageDraw.ImageDraw, x: float, y: float, max_x: float, blame: BlameReport | CarryReport, pal: T.Palette, *, compact: bool = False) -> None:
+    """'BLAME 41%' pill, a share bar, then the facts it is built on, fitted to the remaining width."""
+    f_lbl = T.font("semibold", 11 if compact else 13)
+    f_val = T.font("bold", 14 if compact else 17)
+    f_txt = T.font("regular", 12 if compact else 14)
+    h = 26 if compact else 30
+    x0 = x
+    lbl = blame.label
+    val = f"{blame.share}%"
+    pill_w = P.text_w(draw, lbl, f_lbl) + P.text_w(draw, val, f_val) + 30
+    color = pal.accent if getattr(blame, "positive", False) or not blame.heavy else T.BAD
+    P.rounded(draw, (x, y, x + pill_w, y + h), h // 2, color + (48,), outline=color + (150,))
+    P.draw_text(draw, (x + 11, y + h / 2), lbl, f_lbl, color, anchor="lm")
+    P.draw_text(draw, (x + pill_w - 11, y + h / 2), val, f_val, T.TEXT, anchor="rm")
+    x += pill_w + 12
+    # share bar: 0..50% maps to the full bar so an even 20% split sits at 40%
+    bar_w = 90 if compact else 120
+    P.rounded(draw, (x, y + h / 2 - 4, x + bar_w, y + h / 2 + 4), 4, (255, 255, 255, 30))
+    fill_w = max(8, min(bar_w, bar_w * blame.share / 50))
+    P.rounded(draw, (x, y + h / 2 - 4, x + fill_w, y + h / 2 + 4), 4, color + (230,))
+    x += bar_w + 14
+    rank = f"{_ordinal(blame.rank)} of {blame.team_size} on the team"
+    if compact:
+        # rank next to the bar, facts on their own line underneath
+        P.draw_text(draw, (x, y + h / 2), P.fit_text(draw, rank, f_txt, max_x - x), f_txt, T.MUTED, anchor="lm")
+        if blame.facts:
+            P.draw_text(draw, (x0, y + h + 12), P.fit_text(draw, " · ".join(blame.facts), f_txt, max_x - x0), f_txt, T.MUTED, anchor="lm")
+        return
+    txt = P.fit_text(draw, " · ".join([rank, *blame.facts]), f_txt, max_x - x)
+    P.draw_text(draw, (x, y + h / 2), txt, f_txt, T.MUTED, anchor="lm")
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 def _outcome(r: TrackedResult) -> tuple[str, tuple]:
@@ -159,6 +202,9 @@ def _hero_single(img: Image.Image, record: MatchRecord, hero: HeroPlayer, pal: T
         for j, ln in enumerate(lines):
             P.draw_text(draw, (MARGIN, base_y + j * 28), ln, f, (255, 232, 232) if pal is T.SHAME else T.TEXT, shadow=True)
 
+    if hero.blame is not None:
+        _blame_strip(draw, MARGIN, 504, W - MARGIN, hero.blame, pal)
+
 
 def _hero_panel(img: Image.Image, record: MatchRecord, hero: HeroPlayer, pal: T.Palette, x0: int, y0: int, w: int, h: int) -> None:
     draw = ImageDraw.Draw(img, "RGBA")
@@ -209,6 +255,9 @@ def _hero_panel(img: Image.Image, record: MatchRecord, hero: HeroPlayer, pal: T.
         f = T.font("italic", 16)
         for j, ln in enumerate(P.wrap_text(draw, f"“{hero.line}”", f, w - pad * 2, max_lines=3)):
             P.draw_text(draw, (x0 + pad, fy + 26 + j * 22), ln, f, (255, 232, 232) if pal is T.SHAME else T.TEXT, shadow=True)
+
+    if hero.blame is not None:
+        _blame_strip(draw, x0 + pad, y0 + h - pad - 46, x0 + w - pad, hero.blame, pal, compact=True)
 
 
 def _scoreboard(img: Image.Image, y: int, record: MatchRecord, *, highlight: dict[str, T.Palette], tracked: set[str]) -> int:
@@ -282,6 +331,8 @@ def render_match_card(
 ) -> bytes:
     multi = len(heroes) > 1
     hero_h = 540 if multi else 500
+    if any(h.blame is not None for h in heroes):
+        hero_h += BLAME_STRIP_H_COMPACT if multi else BLAME_STRIP_H
     board_h = 22 + sum(44 + len(t.players) * 32 + 10 + 12 for t in record.teams) + 18
     total_h = hero_h + 20 + board_h + 26
 

@@ -1,6 +1,9 @@
 # One roast per line. Copy this file to roasts_custom.txt (CUSTOM_ROASTS_FILE) and add your inside jokes.
 # Lines starting with # are ignored. Placeholders: {nick} {kills} {deaths} {map} {adr} {kd} {hs} {rounds} {score} {mvps}
+# Extended stats: {clutches} {clutch_wins} {entries} {entry_wins} {nades} {damage_nades} {util_dmg} {flashes} {enemies_flashed} {blame}
 # Custom lines are mixed into the built-in pool with the same odds.
 {nick} went {kills}-{deaths} on {map} and still asked for the drop.
 {kills} kills. Somewhere a Level 1 is warming up to take {nick}'s spot.
 {nick}: "one more" — the one more was {kills} kills.
+{nick} threw {nades} nades all game. The smokes are still in the inventory.
+{blame}% of that loss belongs to {nick}. The receipts are on the scoreboard.
