@@ -205,6 +205,13 @@ PRAISE: dict[str, list[str]] = {
         "{carry}% of everything the team did. The rest was moral support.",
         "A {score} win that was {carry}% you. Your teammates' ELO is a gift and they know it.",
     ],
+    "duo_carry": [
+        "Duo carry: {carry}% of the team's output on your row and the rest on your partner's. Three passengers.",
+        "Carried {score} as a pair. {kill_share}% of the team's kills yours, and the other three watched two people play.",
+        "A two-man job: {carry}% of the team's output. The other three were the audience.",
+        "{carry}% of everything the team did, and your co-pilot had the rest. Three spectators with ELO.",
+        "Co-carried {score}. Between the two of you the other three were optional.",
+    ],
     "wasted": [
         "Lost {score} anyway. {carry}% of the team's output, wasted on four passengers.",
         "{kills} kills in a loss. The scoreboard knows who to blame, and it isn't you.",
@@ -253,7 +260,7 @@ PRAISE: dict[str, list[str]] = {
     ],
 }
 
-PRAISE_ORDER = ("hard_carry", "wasted", "top_of_lobby", "untouchable", "clutch_king", "entry_king", "mvp_machine", "headhunter", "utility_master")
+PRAISE_ORDER = ("hard_carry", "duo_carry", "wasted", "top_of_lobby", "untouchable", "clutch_king", "entry_king", "mvp_machine", "headhunter", "utility_master")
 
 # Modifiers that describe a specific failure get picked before the generic ones.
 MOMENT_MODIFIERS = ("bait_job", "blame_heavy", "clutch_donor", "entry_fodder", "nade_hoarder", "blank_nades", "flash_artist")
@@ -569,10 +576,10 @@ class RoastEngine:
         pool = ACE_LINES if ace else GLORY_LINES
         line = ctx.fmt(self._pick(rng, pool))
         keys = [k for k in PRAISE_ORDER if k in ctx.awards]
-        if "hard_carry" in keys or "wasted" in keys:  # the carry line says it; top-of-lobby would repeat it
+        if "hard_carry" in keys or "duo_carry" in keys or "wasted" in keys:  # the carry line says it; top-of-lobby would repeat it
             keys = [k for k in keys if k != "top_of_lobby"]
         rng.shuffle(keys)
         # the carry/wasted verdict always speaks first when present
-        keys.sort(key=lambda k: 0 if k in ("hard_carry", "wasted") else 1)
+        keys.sort(key=lambda k: 0 if k in ("hard_carry", "duo_carry", "wasted") else 1)
         mods = [ctx.fmt(self._pick(rng, PRAISE[k])) for k in keys[:2]]
         return " ".join([line, *mods])

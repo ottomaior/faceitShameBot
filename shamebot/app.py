@@ -249,6 +249,8 @@ class App:
             return f"{pal.headline} — {max(h.result.kills for h in heroes)} BOMB"
         if kind is PostKind.GLORY and all("hard_carry" in h.result.awards for h in heroes):
             return f"{pal.headline} — HARD CARRY"
+        if kind is PostKind.GLORY and len(heroes) >= 2 and all(("duo_carry" in h.result.awards or "hard_carry" in h.result.awards) for h in heroes):
+            return f"{pal.headline} — DUO CARRY"
         if kind is PostKind.GLORY and all("wasted" in h.result.awards for h in heroes):
             return f"{pal.headline} — WASTED"
         if kind is PostKind.LIABILITY and all(h.result.result == 1 for h in heroes):

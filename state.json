@@ -1,6 +1,6 @@
 {
  "schema_version": 3,
- "saved_at": "2026-09-13T18:24:35.646298+00:00",
+ "saved_at": "2026-09-13T18:29:46.358433+00:00",
  "processed_matches": [],
  "match_outcomes": {},
  "players": {
@@ -12,8 +12,8 @@
    "steam_id": "76561198899254198",
    "level": 7,
    "elo": 1356,
-   "elo_updated_at": "2026-09-13T18:24:33.834433+00:00",
-   "elo_ts": 1789323873,
+   "elo_updated_at": "2026-09-13T18:29:44.580313+00:00",
+   "elo_ts": 1789324184,
    "faceit_url": "https://www.faceit.com/en/players/BRNWr",
    "elo_history": [
     [
@@ -30,8 +30,8 @@
    "steam_id": "76561197998402619",
    "level": 6,
    "elo": 1224,
-   "elo_updated_at": "2026-09-13T18:24:34.009223+00:00",
-   "elo_ts": 1789323874,
+   "elo_updated_at": "2026-09-13T18:29:44.747095+00:00",
+   "elo_ts": 1789324184,
    "faceit_url": "https://www.faceit.com/en/players/szucsu",
    "elo_history": [
     [
@@ -48,8 +48,8 @@
    "steam_id": "76561198023973928",
    "level": 6,
    "elo": 1322,
-   "elo_updated_at": "2026-09-13T18:24:34.176308+00:00",
-   "elo_ts": 1789323874,
+   "elo_updated_at": "2026-09-13T18:29:44.913925+00:00",
+   "elo_ts": 1789324184,
    "faceit_url": "https://www.faceit.com/en/players/mindtech",
    "elo_history": [
     [
@@ -66,8 +66,8 @@
    "steam_id": "76561198077387945",
    "level": 6,
    "elo": 1254,
-   "elo_updated_at": "2026-09-13T18:24:34.335537+00:00",
-   "elo_ts": 1789323874,
+   "elo_updated_at": "2026-09-13T18:29:45.069951+00:00",
+   "elo_ts": 1789324185,
    "faceit_url": "https://www.faceit.com/en/players/Baanya",
    "elo_history": [
     [
@@ -84,8 +84,8 @@
    "steam_id": "76561198002484379",
    "level": 4,
    "elo": 956,
-   "elo_updated_at": "2026-09-13T18:24:34.495225+00:00",
-   "elo_ts": 1789323874,
+   "elo_updated_at": "2026-09-13T18:29:45.233356+00:00",
+   "elo_ts": 1789324185,
    "faceit_url": "https://www.faceit.com/en/players/noXius-",
    "elo_history": [
     [
@@ -99,6 +99,13 @@
  "stats_backfill_completed_at": null,
  "liability_since": null,
  "grey_zone_since": null,
- "recent_roasts": [],
+ "recent_roasts": [
+  "{kills} kills. The enemy's economy was your personal ATM.",
+  "Co-carried {score}. Between the two of you the other three were optional.",
+  "{clutch_wins} clutch rounds won. 'Last alive' was your best position.",
+  "{kills} kills with a {kd} K/D. The enemy's excuses are already in the group chat.",
+  "{carry}% of the team's output. Four passengers, one engine, {score} on the board.",
+  "{mvps} MVP rounds. The star icon should be a loyalty card by now."
+ ],
  "pending_postmortems": {}
 }

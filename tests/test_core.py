@@ -534,6 +534,21 @@ def test_fame_carry_rule_and_awards():
     # the same line on a LOSS without the lobby lead -> no post
     rec, pid = _fame_record(26, 14, 116.0, result=0, scores=(10, 13), lobby_best=29)
     assert is_fame_carry(rec, pid, th) is None
+    # duo carry: two tracked players top-2 on a win, 36% + 27% >= 56% -> both post, headline DUO CARRY
+    from shamebot.rules import duo_carry_partner
+    rec, pid = _fame_record(26, 14, 116.0, lobby_best=29)
+    t0 = rec.teams[0].players[1]
+    t0.k, t0.d, t0.adr, t0.kd, t0.mvp = 21, 13, 91.6, 1.62, 3
+    rec.players["t0"] = TrackedResult(nickname="t0", kills=21, shamed=False, deaths=13, adr=91.6, kd=1.62, hs_pct=19, mvps=3, result=1,
+                                      team_score=13, enemy_score=8, entry_count=5, entry_wins=3, c1v1=4, w1v1=2, c1v2=0, w1v2=0, utility_damage=308)
+    assert duo_carry_partner(rec, "t0", th) == "me"
+    dets = detect(rec, streaks_before={}, thresholds=th)
+    assert [d.kind for d in dets] == [PostKind.GLORY] and set(dets[0].player_ids) == {"me", "t0"}
+    assert "duo_carry" in rec.players["t0"].awards and "hard_carry" in rec.players["me"].awards
+    # the same duo on a loss -> nothing
+    rec.teams[0].win, rec.teams[1].win = False, True
+    rec.players["me"].result = rec.players["t0"].result = 0
+    assert duo_carry_partner(rec, "t0", th) is None
     # same carry on a loss -> WASTED
     rec, pid = _fame_record(26, 11, 106.0, result=0, scores=(11, 13))
     detect(rec, streaks_before={}, thresholds=th)

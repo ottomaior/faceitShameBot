@@ -37,6 +37,7 @@ AWARD_LABELS: dict[str, str] = {
     # --- fame awards (glory posts) ---
     "top_of_lobby": "Top of the lobby",
     "hard_carry": "Hard carry",
+    "duo_carry": "Duo carry",
     "wasted": "Wasted",
     "ace": "Ace",
     "clutch_king": "Clutch king",
@@ -67,6 +68,7 @@ AWARD_EMOJI: dict[str, str] = {
     "bait_job": "🎣",
     "top_of_lobby": "👑",
     "hard_carry": "🚂",
+    "duo_carry": "🤝",
     "wasted": "🥀",
     "ace": "🃏",
     "clutch_king": "🧊",
@@ -221,6 +223,36 @@ def is_fame_carry(record: MatchRecord, pid: str, thresholds: Thresholds) -> Carr
     return None
 
 
+def _carry_gate(r: TrackedResult, thresholds: Thresholds) -> bool:
+    return r.kills >= thresholds.fame_carry_kills and r.enriched and (
+        (r.kd or 0) >= thresholds.fame_carry_kd or (r.adr or 0) >= thresholds.fame_carry_adr
+    )
+
+
+def duo_carry_partner(record: MatchRecord, pid: str, thresholds: Thresholds) -> str | None:
+    """The tracked teammate this player carried a WIN with, or None.
+
+    Two carries split the team's output, so neither reaches the single-carry share on his own.
+    A duo counts when the top two on the team are both tracked, both clear the kill and K/D-or-ADR
+    gates, and together they own what two single carries would (2 x FAME_CARRY_SHARE).
+    """
+    r = record.players.get(pid)
+    if r is None or r.result != 1 or not _carry_gate(r, thresholds):
+        return None
+    mine = compute_carry(record, pid)
+    if mine is None or mine.rank > 2:
+        return None
+    for other, ro in record.players.items():
+        if other == pid or ro.result != 1 or not _carry_gate(ro, thresholds):
+            continue
+        oc = compute_carry(record, other)
+        if oc is None or oc.rank > 2 or record.team_of(other) is not record.team_of(pid):
+            continue
+        if mine.share + oc.share >= 2 * thresholds.fame_carry_share:
+            return other
+    return None
+
+
 def fame_awards(record: MatchRecord, pid: str) -> list[str]:
     """Badges for a glory-post player: what made the game exceptional."""
     r = record.players[pid]
@@ -232,6 +264,8 @@ def fame_awards(record: MatchRecord, pid: str) -> list[str]:
         awards.append("top_of_lobby")
     if c is not None and c.rank == 1 and c.heavy:
         awards.append("hard_carry" if c.won else "wasted")
+    elif c is not None and c.won and duo_carry_partner(record, pid, Thresholds()) is not None:
+        awards.append("duo_carry")
     if r.kd is not None and r.kd >= UNTOUCHABLE_KD:
         awards.append("untouchable")
     if (r.mvps or 0) >= MVP_MACHINE_MIN:
@@ -344,6 +378,7 @@ def detect(
             r.kills >= thresholds.glory_kills
             or ((r.penta or 0) >= 1 and r.kills >= thresholds.ace_min_kills)
             or is_fame_carry(record, pid, thresholds) is not None
+            or duo_carry_partner(record, pid, thresholds) is not None
         ):
             glorious.append(pid)
         elif is_liability(record, pid, thresholds) is not None:
