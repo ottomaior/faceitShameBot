@@ -102,6 +102,21 @@ def test_best_and_worst_at():
     assert res.row("util").worst_at != "Utility"
 
 
+def test_worst_means_last_on_team_not_own_lowest():
+    # Star is top of the team in every category except HS%; his lowest own category is still 2nd on the team.
+    star = _line("Star", k=25, d=10, adr=110, mvp=4, hs=20, util_dmg=150, enemies_flashed=9, clutch_wins=2, first_kills=5, entry_wins=4)
+    res = _result([star, _line("A", k=15, d=16, hs=50), _line("B", k=12, d=18, hs=45), _line("C", k=10, d=20, hs=40)])
+    row = res.row("star")
+    assert row.rank == 1 and row.worst_at is None and row.low_at == "Discipline"
+    assert res.row("c").worst_at in ("Fragging", "Impact", "Discipline") and res.row("c").best_at is None
+
+
+def test_score_is_from_ranked_teams_perspective():
+    rec = _two_team_record(["p1"], ["p3"])
+    assert analyze(rec, team_index=0, tracked={"p1", "p3"}, leetify=None).score == "13 – 9"
+    assert analyze(rec, team_index=1, tracked={"p1", "p3"}, leetify=None).score == "9 – 13"
+
+
 # ----------------------------------------------------------------- callouts
 
 

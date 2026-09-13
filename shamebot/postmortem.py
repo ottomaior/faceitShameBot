@@ -220,8 +220,9 @@ class RankedRow:
     rank: int  # 1 = best on the team
     score: float  # 0..1
     cat_scores: dict[str, float | None]
-    best_at: str | None
-    worst_at: str | None
+    best_at: str | None  # category this player leads on the team (largest margin)
+    worst_at: str | None  # category this player is last on the team in (largest gap)
+    low_at: str | None  # the player's own lowest category, for prose ("invisible at ...")
     kills_rank: int
     leetify_rank: int | None
 
@@ -250,23 +251,28 @@ def score_team(lines: list[PlayerLine], categories: list[TeamCategory]) -> list[
 
     rows: list[RankedRow] = []
     for idx, ln in enumerate(order, 1):
-        best_at = worst_at = None
-        best_margin = -1.0
-        worst_score = 2.0
+        best_at = worst_at = low_at = None
+        best_margin = worst_margin = -1.0
+        low_score = 2.0
         for c in usable:
             mine = cat_scores[ln.pid][c.name]
             if mine is None:
                 continue
             others = [s for p, s in ((o.pid, cat_scores[o.pid][c.name]) for o in lines) if p != ln.pid and s is not None]
-            if others and mine > max(others) and mine - max(others) > best_margin:
+            if not others or max(others) - min(others) < 1e-9 and abs(mine - others[0]) < 1e-9:
+                continue  # flat category: nobody leads, nobody trails
+            # BEST: at least tied for the top; WORST: at least tied for the bottom. Largest margin wins.
+            if mine >= max(others) - 1e-9 and mine - max(others) > best_margin:
                 best_margin, best_at = mine - max(others), c.name
-            if mine < worst_score:
-                worst_score, worst_at = mine, c.name
+            if mine <= min(others) + 1e-9 and min(others) - mine > worst_margin:
+                worst_margin, worst_at = min(others) - mine, c.name
+            if mine < low_score:
+                low_score, low_at = mine, c.name
         if worst_at == best_at:
             worst_at = None
         rows.append(RankedRow(
             line=ln, rank=idx, score=scores[ln.pid], cat_scores=cat_scores[ln.pid],
-            best_at=best_at, worst_at=worst_at,
+            best_at=best_at, worst_at=worst_at, low_at=low_at,
             kills_rank=kills.rank(ln.pid) or idx, leetify_rank=leet.rank(ln.pid),
         ))
     return rows
@@ -367,7 +373,7 @@ def _ctx(res: PostmortemResult, row: RankedRow) -> dict:
         "nick": ln.nick, "rank": row.rank, "rank_ord": ordinal(row.rank), "n": len(res.rows),
         "kills": ln.k, "deaths": ln.d, "assists": ln.a, "adr": f"{ln.adr:.0f}", "kd": f"{ln.kd:.2f}",
         "mvps": ln.mvp, "hs": ln.hs,
-        "best": (row.best_at or "nothing").lower(), "worst": (row.worst_at or "nothing").lower(),
+        "best": (row.best_at or "nothing").lower(), "worst": (row.worst_at or row.low_at or "nothing").lower(),
         "score": res.score, "map": res.map_label,
         "mvp": res.mvp.nick, "anchor": res.anchor.nick, "kills_leader": kills_leader.nick,
         "entries": ln.entry_count or 0, "entry_wins": ln.entry_wins or 0,
@@ -518,7 +524,7 @@ def write_prose(res: PostmortemResult, *, seed: str, recent: list[str] | None = 
     base.update({
         "best_mvp": (mvp.best_at or "everything").lower(),
         "anchor_ord": ordinal(anchor.rank),
-        "worst_anchor": (anchor.worst_at or "everything").lower(),
+        "worst_anchor": (anchor.worst_at or anchor.low_at or "everything").lower(),
     })
     if res.won:
         pool = HEADLINE_WON_TRACKED_MVP if mvp.line.tracked else HEADLINE_WON_RANDOM_MVP
@@ -557,7 +563,7 @@ def analyze(
     res = PostmortemResult(
         match_id=record.match_id,
         map_label=record.map_label,
-        score=(record.score or " / ".join(str(t.score) for t in record.teams)).replace(" / ", " – "),
+        score=f"{team.score} – {max((t.score for i, t in enumerate(record.teams) if i != team_index), default=0)}",
         won=team.win,
         rounds=record.rounds or sum(t.score for t in record.teams),
         team_name=team.name,
