@@ -321,9 +321,11 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
         if not record or not record.players:
             await interaction.followup.send("Match not found, or no tracked player in it.")
             return
-        pids = list(record.players)
         post_kind = {"shame": PostKind.SHAME, "redemption": PostKind.REDEMPTION, "glory": PostKind.GLORY, "liability": PostKind.LIABILITY}.get(kind)
-        if post_kind is PostKind.SHAME:
+        # Prefer the real detection for that kind (exact heroes + awards); fall back to forcing it on everyone.
+        detected = next((d for d in app.detect(record) if d.kind is post_kind), None)
+        pids = list(detected.player_ids) if detected else list(record.players)
+        if post_kind is PostKind.SHAME and not detected:
             for pid in pids:
                 record.players[pid].shamed = True
                 record.players[pid].awards = compute_awards(record, pid, streak_before=app.streak_before(pid, record.finished_at), shamed_count=len(pids), kill_threshold=app.thresholds.kill_threshold)
