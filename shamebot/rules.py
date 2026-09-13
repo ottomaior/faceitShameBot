@@ -210,7 +210,11 @@ def is_fame_carry(record: MatchRecord, pid: str, thresholds: Thresholds) -> Carr
     if r.kills < thresholds.fame_carry_kills or not r.enriched:
         return None
     c = compute_carry(record, pid)
-    if c is None or not c.top_of_lobby or c.rank != 1 or c.share < thresholds.fame_carry_share:
+    if c is None or c.rank != 1 or c.share < thresholds.fame_carry_share:
+        return None
+    # An enemy padding kills on the losing side says nothing about your carry: on a win, best on the
+    # team with the share is enough; on a loss you must also have out-fragged the whole lobby.
+    if not c.top_of_lobby and not c.won:
         return None
     if (r.kd or 0) >= thresholds.fame_carry_kd or (r.adr or 0) >= thresholds.fame_carry_adr:
         return c

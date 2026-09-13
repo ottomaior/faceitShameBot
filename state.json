@@ -1,6 +1,6 @@
 {
  "schema_version": 3,
- "saved_at": "2026-09-13T17:00:53.635015+00:00",
+ "saved_at": "2026-09-13T18:24:35.646298+00:00",
  "processed_matches": [],
  "match_outcomes": {},
  "players": {
@@ -10,15 +10,15 @@
    "avatar": "https://distribution.faceit-cdn.net/images/e5774aca-7474-493d-825b-7cf74cba63bd.jpeg",
    "country": "hu",
    "steam_id": "76561198899254198",
-   "level": 6,
-   "elo": 1300,
-   "elo_updated_at": "2026-09-13T17:00:51.627562+00:00",
-   "elo_ts": 1789318851,
+   "level": 7,
+   "elo": 1356,
+   "elo_updated_at": "2026-09-13T18:24:33.834433+00:00",
+   "elo_ts": 1789323873,
    "faceit_url": "https://www.faceit.com/en/players/BRNWr",
    "elo_history": [
     [
-     1789318851,
-     1300
+     1789323873,
+     1356
     ]
    ]
   },
@@ -28,15 +28,15 @@
    "avatar": "https://assets.faceit-cdn.net/avatars/6e20f3be-622e-4926-a94d-5f770ea3041f_1551314211042.jpg",
    "country": "ro",
    "steam_id": "76561197998402619",
-   "level": 5,
-   "elo": 1176,
-   "elo_updated_at": "2026-09-13T17:00:51.796702+00:00",
-   "elo_ts": 1789318851,
+   "level": 6,
+   "elo": 1224,
+   "elo_updated_at": "2026-09-13T18:24:34.009223+00:00",
+   "elo_ts": 1789323874,
    "faceit_url": "https://www.faceit.com/en/players/szucsu",
    "elo_history": [
     [
-     1789318851,
-     1176
+     1789323874,
+     1224
     ]
    ]
   },
@@ -47,14 +47,14 @@
    "country": "ro",
    "steam_id": "76561198023973928",
    "level": 6,
-   "elo": 1265,
-   "elo_updated_at": "2026-09-13T17:00:51.973118+00:00",
-   "elo_ts": 1789318851,
+   "elo": 1322,
+   "elo_updated_at": "2026-09-13T18:24:34.176308+00:00",
+   "elo_ts": 1789323874,
    "faceit_url": "https://www.faceit.com/en/players/mindtech",
    "elo_history": [
     [
-     1789318851,
-     1265
+     1789323874,
+     1322
     ]
    ]
   },
@@ -66,12 +66,12 @@
    "steam_id": "76561198077387945",
    "level": 6,
    "elo": 1254,
-   "elo_updated_at": "2026-09-13T17:00:52.127949+00:00",
-   "elo_ts": 1789318852,
+   "elo_updated_at": "2026-09-13T18:24:34.335537+00:00",
+   "elo_ts": 1789323874,
    "faceit_url": "https://www.faceit.com/en/players/Baanya",
    "elo_history": [
     [
-     1789318852,
+     1789323874,
      1254
     ]
    ]
@@ -84,12 +84,12 @@
    "steam_id": "76561198002484379",
    "level": 4,
    "elo": 956,
-   "elo_updated_at": "2026-09-13T17:00:52.310009+00:00",
-   "elo_ts": 1789318852,
+   "elo_updated_at": "2026-09-13T18:24:34.495225+00:00",
+   "elo_ts": 1789323874,
    "faceit_url": "https://www.faceit.com/en/players/noXius-",
    "elo_history": [
     [
-     1789318852,
+     1789323874,
      956
     ]
    ]

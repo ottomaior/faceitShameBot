@@ -327,7 +327,7 @@ def help_text(app: "App") -> list[str]:
         + (f"🎣 **Grey zone** — {s.kill_threshold}–{s.kill_threshold + s.shame_grey_zone - 1} kills still shame when the rest was bad too (K/D < {s.shame_grey_kd}, ADR < {s.shame_grey_adr:.0f}, or worst on the team). Rushing for the tenth kill doesn't help.\n" if s.shame_grey_zone > 0 else "")
         + f"🌅 **Redemption Arc** — 2+ shames in a row, then **{s.redemption_kills}+ kills**.\n"
         + (f"🪨 **Liability** — {s.kill_threshold}+ kills but still the team's worst by a wide margin (blame ≥ {s.liability_blame_share}%, K/D < {s.liability_max_kd}) on a loss or a close win.\n" if s.liability_posts_enabled else "")
-        + (f"🏆 **Wall of Fame** — **{s.glory_kills}+ kills**{ace} (15+ kills), or a hard carry: top-fragger of the lobby, best on the team, {s.fame_carry_kills}+ kills with K/D ≥ {s.fame_carry_kd} or ADR ≥ {s.fame_carry_adr:.0f}.\n" if s.glory_posts_enabled else "")
+        + (f"🏆 **Wall of Fame** — **{s.glory_kills}+ kills**{ace} (15+ kills), or a hard carry: best on the team with {s.fame_carry_share}%+ of its output, {s.fame_carry_kills}+ kills with K/D ≥ {s.fame_carry_kd} or ADR ≥ {s.fame_carry_adr:.0f} (on a loss: top-fragger of the lobby too).\n" if s.glory_posts_enabled else "")
         + ("📅 **Weekly digest** — leaderboard, bot of the week, biggest ELO loss.\n" if s.weekly_digest_enabled else "")
     )
     buttons = (

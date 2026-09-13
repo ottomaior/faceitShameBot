@@ -525,6 +525,15 @@ def test_fame_carry_rule_and_awards():
     rec, pid = _fame_record(22, 20, 80.0, lobby_best=24)
     assert is_fame_carry(rec, pid, th) is None
     assert detect(rec, streaks_before={}, thresholds=th) == []
+    # carried a WIN while an enemy out-fragged the lobby -> still a carry (the BRNWr 26K Inferno case)
+    rec, pid = _fame_record(26, 14, 116.0, lobby_best=29)
+    c = is_fame_carry(rec, pid, th)
+    assert c is not None and not c.top_of_lobby and c.won
+    assert [d.kind for d in detect(rec, streaks_before={}, thresholds=th)] == [PostKind.GLORY]
+    assert "top_of_lobby" not in rec.players[pid].awards and "hard_carry" in rec.players[pid].awards
+    # the same line on a LOSS without the lobby lead -> no post
+    rec, pid = _fame_record(26, 14, 116.0, result=0, scores=(10, 13), lobby_best=29)
+    assert is_fame_carry(rec, pid, th) is None
     # same carry on a loss -> WASTED
     rec, pid = _fame_record(26, 11, 106.0, result=0, scores=(11, 13))
     detect(rec, streaks_before={}, thresholds=th)
