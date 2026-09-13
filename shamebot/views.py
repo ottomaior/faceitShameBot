@@ -323,8 +323,10 @@ def help_text(app: "App") -> list[str]:
         f"Watches {nicks} on FaceIT CS2 and checks every finished match within ~{minutes} min.\n\n"
         "## What gets posted\n"
         f"🧱 **Wall of Shame** — fewer than **{s.kill_threshold} kills** → a card with the full scoreboard, "
-        "your stats, a roast, award badges and your ELO change. Two of you in the same game = **Double Feature**.\n"
-        f"🌅 **Redemption Arc** — 2+ shames in a row, then **{s.redemption_kills}+ kills**.\n"
+        "your stats, a **blame report** (your share of the team's shortfall vs your own four teammates), a roast, award badges and your ELO change. Two of you in the same game = **Double Feature**.\n"
+        + (f"🎣 **Grey zone** — {s.kill_threshold}–{s.kill_threshold + s.shame_grey_zone - 1} kills still shame when the rest was bad too (K/D < {s.shame_grey_kd}, ADR < {s.shame_grey_adr:.0f}, or worst on the team). Rushing for the tenth kill doesn't help.\n" if s.shame_grey_zone > 0 else "")
+        + f"🌅 **Redemption Arc** — 2+ shames in a row, then **{s.redemption_kills}+ kills**.\n"
+        + (f"🪨 **Liability** — {s.kill_threshold}+ kills but still the team's worst by a wide margin (blame ≥ {s.liability_blame_share}%, K/D < {s.liability_max_kd}) on a loss or a close win.\n" if s.liability_posts_enabled else "")
         + (f"🏆 **Wall of Fame** — **{s.glory_kills}+ kills**{ace} (15+ kills), or a hard carry: top-fragger of the lobby, best on the team, {s.fame_carry_kills}+ kills with K/D ≥ {s.fame_carry_kd} or ADR ≥ {s.fame_carry_adr:.0f}.\n" if s.glory_posts_enabled else "")
         + ("📅 **Weekly digest** — leaderboard, bot of the week, biggest ELO loss.\n" if s.weekly_digest_enabled else "")
     )
@@ -336,7 +338,9 @@ def help_text(app: "App") -> list[str]:
         "## Awards\n"
         "🪦 Bottom of the lobby · 🎬 Double feature · 🎩 Hat-trick (3 in a row, then 🔥 Streak N) · "
         "🎒 Carried (shamed but won) · ⚓ Anchor (lost by 8+) · 👀 Spectator (≤ 3 kills) · "
-        "🍽️ Fed (20+ deaths) · 🫥 Zero MVP club · 🎯 Headless (< 20% HS)\n\n"
+        "🍽️ Fed (20+ deaths) · 🫥 Zero MVP club · 🎯 Headless (< 20% HS)\n"
+        "Moment awards: 🎁 Clutch donor · 🚪 Entry fodder · 🧳 Nade hoarder · 💨 Blank nades · 🔦 Flash artist · 🎣 Bait job (grey zone)\n"
+        "Fame awards: 👑 Top of the lobby · 🚂 Hard carry · 🃏 Ace · 🧊 Clutch king · 🚀 Entry king · 🧪 Utility master · ⭐ MVP machine\n\n"
         "## Titles (last {n} games)\n"
         "**Saint** 0 shames · **Slump** 1–2 · **Regular** 3–4 · **Permanent resident** 5+ · **Heater (reverse)** 3 in a row"
     ).replace("{n}", str(s.post_history_limit))
