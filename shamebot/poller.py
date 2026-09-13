@@ -292,7 +292,7 @@ class Poller:
                 view, files = postmortem_view(res, png, links=links)
                 await self.channels.get("postmortem", self.channel).send(view=view, files=files)
                 posted += 1
-                log.info("Posted post-mortem for match %s (leetify=%s).", mid, res.leetify_used)
+                log.info("Posted post-mortem for match %s: leetify=%s, %d min after the match finished.", mid, res.leetify_used, (now - finished_at) // 60)
             except discord.HTTPException as exc:
                 log.error("Failed to post post-mortem for %s: %s", mid, exc)
             del st.pending_postmortems[mid]
