@@ -13,7 +13,7 @@ from .app import App
 from .models import SCHEMA_VERSION
 from .rules import Detection, PostKind
 from .stats import HallEntry
-from .views import MENTION_USERS, leaderboard_view, match_view
+from .views import MENTION_USERS, leaderboard_view, match_view, postmortem_view
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ class Poller:
     def __init__(self, client: discord.Client, app: App) -> None:
         self.client = client
         self.app = app
-        self.channel: discord.abc.Messageable | None = None
+        self.channel: discord.abc.Messageable | None = None  # shame channel (also the fallback)
+        self.channels: dict[str, discord.abc.Messageable] = {}  # "fame" / "postmortem" when configured
         self._failed_fetches: dict[str, int] = {}
         self._started = False
         self._poll_lock = asyncio.Lock()
@@ -37,6 +38,12 @@ class Poller:
         self.channel = await self.get_shame_channel()
         if self.channel is None:
             return
+        for key, cid in (("fame", self.app.settings.fame_channel_id), ("postmortem", self.app.settings.postmortem_channel_id)):
+            if cid and cid != self.app.settings.shame_channel_id:
+                ch = await self.fetch_channel(cid)
+                if ch is not None:
+                    self.channels[key] = ch
+                    log.info("%s posts go to #%s", key.capitalize(), getattr(ch, "name", cid))
         self.app.arm_grey_zone()
         await self.app.refresh_all_snapshots()
         await self.backfill()
@@ -45,6 +52,22 @@ class Poller:
         self.enrich_loop.start()
         self.digest_loop.start()
         log.info("Loops started (poll every %ss).", self.app.settings.poll_interval_seconds)
+
+    async def fetch_channel(self, cid: int) -> discord.abc.Messageable | None:
+        channel = self.client.get_channel(cid)
+        if channel is not None:
+            return channel  # type: ignore[return-value]
+        try:
+            return await self.client.fetch_channel(cid)  # type: ignore[return-value]
+        except discord.HTTPException as exc:
+            log.error("Cannot access channel %s (%s); falling back to the shame channel.", cid, exc)
+            return None
+
+    def channel_for(self, kind: PostKind) -> discord.abc.Messageable:
+        assert self.channel is not None
+        if kind in (PostKind.GLORY, PostKind.REDEMPTION):
+            return self.channels.get("fame", self.channel)
+        return self.channel
 
     async def get_shame_channel(self) -> discord.abc.Messageable | None:
         cid = self.app.settings.shame_channel_id
@@ -168,6 +191,9 @@ class Poller:
 
                 detections = self.app.detect(record)
                 st.put_match(record)
+                if allow_post and self.postmortem_wanted(record):
+                    st.pending_postmortems[mid] = record.finished_at or int(time.time())
+                    st.mark_dirty()
                 if allow_post:
                     for det in detections:
                         if det.kind is PostKind.LIABILITY and not self._liability_live(record.finished_at):
@@ -194,7 +220,7 @@ class Poller:
         return (finished_at or 0) >= st.liability_since
 
     async def post(self, det: Detection) -> None:
-        assert self.channel is not None
+        channel = self.channel_for(det.kind)
         post = await self.app.render_post(det.match, det.player_ids, det.kind)
         s = self.app.settings
         mention_ids: list[int] = []
@@ -204,7 +230,7 @@ class Poller:
                 if uid:
                     mention_ids.append(uid)
         view, files = match_view(self.app, post, mention_ids=mention_ids)
-        msg = await self.channel.send(view=view, files=files, allowed_mentions=MENTION_USERS)
+        msg = await channel.send(view=view, files=files, allowed_mentions=MENTION_USERS)
         log.info("Posted %s for match %s: %s", det.kind.value, det.match.match_id, [self.app.nick(p) for p in det.player_ids])
         if det.kind is PostKind.SHAME:
             for emoji in s.shame_reactions:
@@ -219,6 +245,60 @@ class Poller:
             await self.poll_once(allow_post=True)
         except Exception:  # noqa: BLE001 - keep the loop alive
             log.exception("Poll cycle failed")
+        try:
+            await self.flush_postmortems()
+        except Exception:  # noqa: BLE001
+            log.exception("Post-mortem flush failed")
+
+    # -------------------------------------------------------- post-mortem
+
+    def postmortem_wanted(self, record) -> bool:
+        """Auto post-mortem for matches with >= POSTMORTEM_MIN_TRACKED tracked players on one team."""
+        s = self.app.settings
+        if not s.postmortem_auto or not record.teams:
+            return False
+        tracked = set(self.app.tracked)
+        return max(sum(1 for row in t.players if row.pid in tracked) for t in record.teams) >= s.postmortem_min_tracked
+
+    async def flush_postmortems(self) -> int:
+        """Post pending post-mortems once Leetify has the match or the wait deadline passed. Returns posts sent."""
+        st = self.app.state
+        s = self.app.settings
+        if not st.pending_postmortems or self.channel is None:
+            return 0
+        posted = 0
+        now = int(time.time())
+        for mid, finished_at in list(st.pending_postmortems.items()):
+            deadline = finished_at + s.postmortem_leetify_wait_minutes * 60
+            if s.leetify_enabled and now < deadline and not await self.app.leetify.match_ratings(mid):
+                continue  # Leetify hasn't processed it yet; retry next cycle
+            fresh = await self.app.fetch_record(mid, finished_at=finished_at, with_details=True)
+            if fresh is None:
+                if now > deadline + 6 * 3600:
+                    log.warning("Dropping post-mortem for %s: stats never became available.", mid)
+                    del st.pending_postmortems[mid]
+                    st.mark_dirty()
+                continue
+            cached = st.match_outcomes.get(mid)
+            if cached:
+                for pid, r in fresh.players.items():
+                    if pid in cached.players:
+                        r.elo_after, r.elo_delta, r.awards = cached.players[pid].elo_after, cached.players[pid].elo_delta, cached.players[pid].awards
+            self.app.detect(fresh)
+            st.put_match(fresh)
+            try:
+                res, png = await self.app.postmortem(fresh)
+                links = [("Open on FaceIT", fresh.faceit_url)]
+                view, files = postmortem_view(res, png, links=links)
+                await self.channels.get("postmortem", self.channel).send(view=view, files=files)
+                posted += 1
+                log.info("Posted post-mortem for match %s (leetify=%s).", mid, res.leetify_used)
+            except discord.HTTPException as exc:
+                log.error("Failed to post post-mortem for %s: %s", mid, exc)
+            del st.pending_postmortems[mid]
+            st.mark_dirty()
+        st.flush()
+        return posted
 
     # -------------------------------------------------------- enrichment
 

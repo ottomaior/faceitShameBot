@@ -46,7 +46,7 @@ line and available to roasts as `{blame}` (`shamebot/blame.py`).
 | `/profile [player]` | Player card: level, ELO + 7d/30d change + trend, averages, last-10 form, per-map summary |
 | `/last [player]` | The player's most recent match as a card |
 | `/compare a b [scope]` | Head-to-head **verdict**: 8 weighted categories (Impact, Fragging, Opening, Aim, Clutch, Utility, Teamplay, Consistency) over FaceIT extended stats + Leetify analytics → winner, score, margin, reasons, and a jab |
-| `/postmortem [player] [match_id]` | **Who actually played best in the last game.** Ranks all five players of the friends' team against each other (randoms included) — six categories (Impact incl. Leetify's per-match rating, Fragging, Opening, Clutch, Utility, Discipline), a card with score bars and best/worst chips, a headline verdict, one roast per tracked friend, and *kill-feed illusions* (most kills but mid-table, quiet carries, entry fodder…). Never auto-posted. Default: the newest match with 2+ tracked players; `player` → their last match; `match_id` → any match |
+| `/postmortem [player] [match_id]` | **Who actually played best in the last game.** Ranks all five players of the friends' team against each other (randoms included) — six categories (Impact incl. Leetify's per-match rating, Fragging, Opening, Clutch, Utility, Discipline), a card with score bars and best/worst chips, a headline verdict, one roast per tracked friend, and *kill-feed illusions* (most kills but mid-table, quiet carries, entry fodder…). Also posted automatically after every game with 2+ of you (`POSTMORTEM_AUTO`, see below). Default: the newest match with 2+ tracked players; `player` → their last match; `match_id` → any match |
 | `/maps [player]` | Per-map games / win % / avg kills / wall % |
 | `/elo` | Tracked players ranked by ELO with 7d/30d deltas |
 | `/awards` | Hall of shame: worst game ever, longest streak, biggest ELO loss… |
@@ -104,6 +104,8 @@ See [`.env.example`](.env.example) — every variable is documented there. Highl
 | `SHAME_REACTIONS` | `🤡` | Reactions added to shame posts |
 | `CUSTOM_ROASTS_FILE` | `roasts_custom.txt` | Your own roast lines (see `roasts_custom.txt.example`) |
 | `ADMIN_DISCORD_IDS` | – | Who may run `/shametest` |
+| `FAME_CHANNEL_ID` / `POSTMORTEM_CHANNEL_ID` | – | Optional channels for Wall of Fame + Redemption posts and for automatic post-mortems; unset → `SHAME_CHANNEL_ID`. Slash commands work in any configured channel |
+| `POSTMORTEM_AUTO` / `POSTMORTEM_MIN_TRACKED` / `POSTMORTEM_LEETIFY_WAIT_MINUTES` | `true` / `2` / `120` | Post a post-mortem automatically after every match with that many tracked players on one team — as soon as Leetify has processed it, or after the wait without Leetify |
 | `LEETIFY_API_KEY` | – | Optional Leetify API key (leetify.com/app/developer) for `/compare` and `/profile`; `LEETIFY_ENABLED=false` turns Leetify off |
 | `STATE_FILE` | `state.json` | Persisted cache (use a volume path in production) |
 

@@ -47,6 +47,9 @@ class Settings:
     discord_token: str = os.getenv("DISCORD_TOKEN", "")
     faceit_api_key: str = os.getenv("FACEIT_API_KEY", "")
     shame_channel_id: int = _int("SHAME_CHANNEL_ID", "0")
+    # Optional extra channels; 0 falls back to the shame channel
+    fame_channel_id: int = _int("FAME_CHANNEL_ID", "0")  # Wall of Fame + Redemption Arc
+    postmortem_channel_id: int = _int("POSTMORTEM_CHANNEL_ID", "0")  # automatic post-mortems
     player_entries: list[str] = field(default_factory=lambda: _list("FACEIT_PLAYER_IDS"))
 
     # --- detection ----------------------------------------------------------
@@ -109,6 +112,11 @@ class Settings:
     leetify_enabled: bool = _bool("LEETIFY_ENABLED", "true")
     leetify_api_key: str = os.getenv("LEETIFY_API_KEY", "").strip()
 
+    # --- automatic post-mortem ---------------------------------------------
+    postmortem_auto: bool = _bool("POSTMORTEM_AUTO", "true")
+    postmortem_min_tracked: int = _int("POSTMORTEM_MIN_TRACKED", "2")  # tracked players on the same team
+    postmortem_leetify_wait_minutes: int = _int("POSTMORTEM_LEETIFY_WAIT_MINUTES", "120")
+
     # --- weekly digest ------------------------------------------------------
     weekly_digest_enabled: bool = _bool("WEEKLY_DIGEST_ENABLED", "false")
     weekly_digest_cron_day: int = _int("WEEKLY_DIGEST_CRON_DAY", "0")
@@ -127,6 +135,11 @@ class Settings:
         if missing:
             log.error("Missing required env vars: %s", ", ".join(missing))
             sys.exit(1)
+
+    @property
+    def command_channel_ids(self) -> set[int]:
+        """Channels where slash commands are accepted (all configured post channels)."""
+        return {c for c in (self.shame_channel_id, self.fame_channel_id, self.postmortem_channel_id) if c}
 
     @property
     def discord_id_to_nick(self) -> dict[int, str]:

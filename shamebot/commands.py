@@ -39,8 +39,8 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
     # ------------------------------------------------------------ guards
 
     async def allowed(interaction: discord.Interaction) -> bool:
-        if not s.stats_command_any_channel and s.shame_channel_id and interaction.channel_id != s.shame_channel_id:
-            await interaction.response.send_message("Use this command in the shame channel.", ephemeral=True)
+        if not s.stats_command_any_channel and s.command_channel_ids and interaction.channel_id not in s.command_channel_ids:
+            await interaction.response.send_message("Use this command in the bot's channels.", ephemeral=True)
             return False
         if app.backfill_in_progress:
             await interaction.response.send_message("Stats backfill is still running. Try again in a few minutes.", ephemeral=True)
