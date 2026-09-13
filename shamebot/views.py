@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import ui
 
-from .leetify import ATTRIBUTION
+from .leetify import ATTRIBUTION, fmt_rating
 from .render import theme as T
 from .rules import PostKind, award_emoji, award_label
 
@@ -254,6 +254,53 @@ def compare_view(
     return view, [_file(png, "compare.png")]
 
 
+def postmortem_view(
+    res,
+    png: bytes,
+    *,
+    links: list[tuple[str, str]],
+) -> tuple[ui.LayoutView, list[discord.File]]:
+    """Post-mortem message: headline, the ranked team, one roast per tracked friend, callouts, card, links."""
+    from .postmortem import ordinal
+
+    outcome = "WIN" if res.won else "LOSS"
+    lines = [f"## 🪦 Post-mortem — {res.map_label} {res.score} {outcome}", f"-# {res.team_name} · all {len(res.rows)} on the team ranked", ""]
+    if res.headline:
+        lines.append(res.headline)
+        lines.append("")
+    for row in res.rows:
+        ln = row.line
+        name = f"**{ln.nick}**" if ln.tracked else ln.nick
+        bits = [f"{round(row.score * 100)}", f"{ln.k}/{ln.d}", f"{ln.adr:.0f} ADR"]
+        if ln.leetify is not None:
+            bits.append(f"Leetify {fmt_rating(ln.leetify, fraction=True)}")
+        if row.best_at:
+            bits.append(f"best {row.best_at.lower()}")
+        lines.append(f"**{row.rank}.** {name} — " + " · ".join(bits))
+    if res.lines:
+        lines.append("")
+        for pid in res.tracked_pids:
+            if pid in res.lines:
+                lines.append(f"_{res.lines[pid]}_")
+    if res.callouts:
+        lines.append("")
+        lines.extend(f"🔍 {c.text}" for c in res.callouts)
+    if res.other_team:
+        lines.append("-# " + ", ".join(f"{nick} was on the other team ({ordinal(rank)} of theirs)" for nick, rank in res.other_team))
+    for note in res.notes:
+        lines.append(f"-# ⚠️ {note}")
+    lines.append(f"-# {ATTRIBUTION} · FaceIT Data API" if res.leetify_used else "-# FaceIT Data API")
+    items: list[ui.Item] = [
+        ui.TextDisplay("\n".join(lines)[:3900]),
+        ui.MediaGallery(discord.MediaGalleryItem("attachment://postmortem.png")),
+    ]
+    if links:
+        items.append(ui.ActionRow(*(ui.Button(label=lb, url=u, emoji="🔗") for lb, u in links[:5])))
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*items, accent_colour=_colour(T.REDEMPTION if res.won else T.SHAME)))
+    return view, [_file(png, "postmortem.png")]
+
+
 def text_view(text: str, *, palette: T.Palette = T.NEUTRAL) -> ui.LayoutView:
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(ui.TextDisplay(text[:3900]), accent_colour=_colour(palette)))
@@ -300,6 +347,7 @@ def help_text(app: "App") -> list[str]:
         "`/profile [player]` — level, ELO trend, averages, last-10 form, maps\n"
         "`/last [player]` — most recent match as a card\n"
         "`/compare a b` — head-to-head verdict: who is actually better (FaceIT + Leetify analytics)\n"
+        "`/postmortem [player] [match_id]` — who actually played best in the last game: all 5 teammates ranked, kill-feed illusions exposed\n"
         "`/maps [player]` — per-map record\n"
         "`/elo` — ELO ranking with 7-day / 30-day change\n"
         "`/awards` — hall of shame records\n"

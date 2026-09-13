@@ -46,6 +46,7 @@ line and available to roasts as `{blame}` (`shamebot/blame.py`).
 | `/profile [player]` | Player card: level, ELO + 7d/30d change + trend, averages, last-10 form, per-map summary |
 | `/last [player]` | The player's most recent match as a card |
 | `/compare a b [scope]` | Head-to-head **verdict**: 8 weighted categories (Impact, Fragging, Opening, Aim, Clutch, Utility, Teamplay, Consistency) over FaceIT extended stats + Leetify analytics → winner, score, margin, reasons, and a jab |
+| `/postmortem [player] [match_id]` | **Who actually played best in the last game.** Ranks all five players of the friends' team against each other (randoms included) — six categories (Impact incl. Leetify's per-match rating, Fragging, Opening, Clutch, Utility, Discipline), a card with score bars and best/worst chips, a headline verdict, one roast per tracked friend, and *kill-feed illusions* (most kills but mid-table, quiet carries, entry fodder…). Never auto-posted. Default: the newest match with 2+ tracked players; `player` → their last match; `match_id` → any match |
 | `/maps [player]` | Per-map games / win % / avg kills / wall % |
 | `/elo` | Tracked players ranked by ELO with 7d/30d deltas |
 | `/awards` | Hall of shame: worst game ever, longest streak, biggest ELO loss… |
@@ -113,6 +114,7 @@ See [`.env.example`](.env.example) — every variable is documented there. Highl
 - `shamebot/state.py` — `state.json` (schema v2): full 10-player scoreboard + ADR/K-D/HS/MVP/W-L per
   match, ELO history per player. Older kills-only entries are upgraded in the background.
 - `shamebot/rules.py` / `roasts.py` / `blame.py` — detection, awards, deterministic roast selection, blame report.
+- `shamebot/postmortem.py` — `/postmortem` engine: team-relative min-max scoring per category, callouts, seeded prose.
 - `shamebot/leetify.py` / `compare.py` — Leetify public API client (live only, never persisted, "Data
   provided by Leetify" attribution) and the head-to-head verdict engine.
 - `shamebot/render/` — Pillow cards (bundled Inter + Bebas Neue fonts, SIL OFL).

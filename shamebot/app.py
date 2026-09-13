@@ -13,9 +13,11 @@ from .faceit import FaceitClient
 from .leetify import LeetifyClient, LeetifyProfile
 from .blame import compute_blame, compute_carry
 from .models import MatchRecord, PlayerSnapshot, parse_match
+from .postmortem import PostmortemResult, analyze, choose_team, write_prose
 from .render import theme as T
 from .render.compare_card import CompareSide, render_compare
 from .render.leaderboard_card import LeaderRow, render_leaderboard
+from .render.postmortem_card import render_postmortem
 from .render.profile_card import ProfileData, render_profile
 from .render.shame_card import HeroPlayer, render_match_card
 from .roasts import RoastContext, RoastEngine
@@ -397,6 +399,39 @@ class App:
         for pid, agg, snap, leet in ((pa, agg_a, snap_a, leet_a), (pb, agg_b, snap_b, leet_b)):
             sides.append(CompareSide(agg.nickname, await self._avatar_bytes(pid), snap.level if snap else None, snap.elo if snap else None, agg.title, leet is not None))
         png = await asyncio.to_thread(render_compare, sides[0], sides[1], res, subtitle=self.scope_label(scope), footer=self.settings.bot_stats_title.rstrip(":"))
+        return res, png
+
+    # ------------------------------------------------------------ postmortem
+
+    def pick_postmortem_match(self, pid: str | None = None) -> MatchRecord | None:
+        """``pid`` → their newest match; else the newest match with 2+ tracked players, else the newest of anyone."""
+        if pid:
+            recs = self.state.matches_for_player(pid)
+            return recs[0] if recs else None
+        recs = sorted(self.state.match_outcomes.values(), key=lambda m: m.finished_at, reverse=True)
+        return next((m for m in recs if len(m.players) >= 2), recs[0] if recs else None)
+
+    async def postmortem(self, record: MatchRecord, *, focus_pid: str | None = None) -> tuple[PostmortemResult, bytes]:
+        """Rank the friends' team for one match and render the card. ``record`` should be freshly fetched with details."""
+        ratings: dict[str, float] | None = None
+        notes: list[str] = []
+        if self.settings.leetify_enabled:
+            ratings = await self.leetify.match_ratings(record.match_id) or {}
+            if not ratings and self.leetify.rate_limited:
+                notes.append("Leetify is rate-limiting right now — the rating column is missing.")
+        tracked = set(self.tracked)
+        team_index = choose_team(record, tracked, focus_pid=focus_pid)
+        res = analyze(record, team_index=team_index, tracked=tracked, leetify=ratings, notes=notes)
+        write_prose(res, seed=record.match_id, recent=self.roasts.recent)
+        self.state.mark_dirty()
+        avatars: dict[str, bytes | None] = {}
+        for row in res.rows:
+            if row.line.tracked:
+                avatars[row.pid] = await self._avatar_bytes(row.pid)
+            elif row.line.avatar:
+                avatars[row.pid] = await self.faceit.fetch_image(row.line.avatar)
+        map_bytes = await self.faceit.fetch_image(record.map_image) if record.map_image else None
+        png = await asyncio.to_thread(render_postmortem, res, avatars=avatars, map_bytes=map_bytes, footer=self.settings.bot_stats_title.rstrip(":"))
         return res, png
 
     async def close(self) -> None:

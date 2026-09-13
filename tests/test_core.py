@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 
-from shamebot.models import MatchRecord, PlayerSnapshot, TrackedResult, parse_match
+from shamebot.models import MatchRecord, PlayerSnapshot, ScoreRow, TrackedResult, parse_match
 from shamebot.roasts import RoastContext, RoastEngine
 from shamebot.rules import PostKind, Thresholds, award_label, compute_awards, detect
 from shamebot.state import State
@@ -562,3 +562,17 @@ def test_roasts_avoid_recent_repeats(fixtures, tracked):
     # the memory is what the app persists: a fresh engine over the same list keeps avoiding them
     eng2 = RoastEngine(recent=shared)
     assert eng2.glory(ctx, seed="m0") not in seen or len(GLORY_LINES) <= RECENT_CAP
+
+
+def test_scorerow_extended_for_all_ten_and_roundtrip(fixtures, tracked):
+    rec = parse_match("m", fixtures["stats"], fixtures["details"], tracked, kill_threshold=10)
+    rows = [row for t in rec.teams for row in t.players]
+    assert len(rows) == 10 and all(row.extended for row in rows)
+    assert all(row.steam_id and len(row.steam_id) == 17 for row in rows)
+    assert any(row.avatar for row in rows)
+    d = rows[0].to_dict()
+    assert "avatar" not in d and d["entry_count"] == rows[0].entry_count and d["steam_id"] == rows[0].steam_id
+    back = ScoreRow.from_dict(d)
+    assert back.extended and back.clutches == rows[0].clutches and back.kr == rows[0].kr and back.avatar is None
+    old = ScoreRow.from_dict({"pid": "p", "nick": "n", "k": 1, "d": 2, "a": 0, "adr": 10.0, "kd": 0.5, "hs": 0, "mvp": 0})
+    assert not old.extended and old.steam_id is None and "entry_count" not in old.to_dict()

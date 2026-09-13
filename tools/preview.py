@@ -208,6 +208,22 @@ def preview_compare() -> None:
     (OUT / "8_compare.png").write_bytes(render_compare(sides[0], sides[1], res, subtitle="Last 30 games per player", footer="BRWNr Bot Stats"))
 
 
+def preview_postmortem() -> None:
+    """Post-mortem of the double-feature match with synthetic Leetify ratings."""
+    from shamebot.postmortem import analyze, choose_team, write_prose
+    from shamebot.render.postmortem_card import render_postmortem
+
+    tracked = {p["player_id"]: p["nickname"] for p in load("tracked_players.json")}
+    rec, details = build_record("_shame", tracked)
+    ti = choose_team(rec, set(tracked))
+    leet = {row.steam_id: 0.06 - 0.025 * i for i, row in enumerate(rec.teams[ti].players) if row.steam_id}
+    res = write_prose(analyze(rec, team_index=ti, tracked=set(tracked), leetify=leet), seed="preview")
+    print("headline:", res.headline)
+    avatars = {row.pid: image_bytes(row.line.avatar) for row in res.rows}
+    (OUT / "9_postmortem.png").write_bytes(render_postmortem(res, avatars=avatars, map_bytes=image_bytes(rec.map_image), footer="BRWNr Bot Stats"))
+
+
 if __name__ == "__main__":
     preview_boards()
     preview_compare()
+    preview_postmortem()

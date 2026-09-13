@@ -104,9 +104,48 @@ class ScoreRow:
     hs: int
     mvp: int
     level: int | None = None
+    # --- extended stats, parsed for all ten players since /postmortem (None on rows cached before) ---
+    steam_id: str | None = None  # roster game_player_id (steam64) — the Leetify join key
+    kr: float | None = None
+    entry_count: int | None = None
+    entry_wins: int | None = None
+    first_kills: int | None = None
+    c1v1: int | None = None
+    w1v1: int | None = None
+    c1v2: int | None = None
+    w1v2: int | None = None
+    clutch_kills: int | None = None
+    damage: int | None = None
+    utility_damage: int | None = None
+    enemies_flashed: int | None = None
+    flash_count: int | None = None
+    utility_count: int | None = None
+    avatar: str | None = None  # roster avatar URL; not persisted
+
+    EXTENDED_INTS = (
+        "entry_count", "entry_wins", "first_kills", "c1v1", "w1v1", "c1v2", "w1v2", "clutch_kills",
+        "damage", "utility_damage", "enemies_flashed", "flash_count", "utility_count",
+    )
+
+    @property
+    def extended(self) -> bool:
+        return self.entry_count is not None
+
+    @property
+    def clutches(self) -> int:
+        return (self.c1v1 or 0) + (self.c1v2 or 0)
+
+    @property
+    def clutch_wins(self) -> int:
+        return (self.w1v1 or 0) + (self.w1v2 or 0)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("avatar", None)
+        for key in ("steam_id", "kr", *self.EXTENDED_INTS):
+            if d[key] is None:
+                d.pop(key)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "ScoreRow":
@@ -121,6 +160,9 @@ class ScoreRow:
             hs=_int(d.get("hs")),
             mvp=_int(d.get("mvp")),
             level=_opt_int(d.get("level")),
+            steam_id=d.get("steam_id") or None,
+            kr=None if d.get("kr") is None else _float(d.get("kr")),
+            **{key: _opt_int(d.get(key)) for key in cls.EXTENDED_INTS},
         )
 
 
@@ -345,10 +387,19 @@ def parse_match(
 
     details = details or {}
     levels: dict[str, int] = {}
+    steam_ids: dict[str, str] = {}
+    avatars: dict[str, str] = {}
     for faction in (details.get("teams") or {}).values():
         for member in faction.get("roster") or []:
-            if member.get("player_id") and member.get("game_skill_level"):
-                levels[member["player_id"]] = _int(member["game_skill_level"])  # 0 = unranked -> unknown
+            mpid = member.get("player_id")
+            if not mpid:
+                continue
+            if member.get("game_skill_level"):
+                levels[mpid] = _int(member["game_skill_level"])  # 0 = unranked -> unknown
+            if member.get("game_player_id"):
+                steam_ids[mpid] = str(member["game_player_id"])
+            if member.get("avatar"):
+                avatars[mpid] = member["avatar"]
 
     map_name = round_stats.get("Map") or (details.get("voting", {}).get("map", {}).get("pick") or [None])[0]
     map_image = None
@@ -385,6 +436,22 @@ def parse_match(
                 hs=_int(_stat(ps, "Headshots %")),
                 mvp=_int(_stat(ps, "MVPs")),
                 level=levels.get(pid),
+                steam_id=steam_ids.get(pid),
+                kr=round(_float(_stat(ps, "K/R Ratio")), 2),
+                entry_count=_int(_stat(ps, "Entry Count")),
+                entry_wins=_int(_stat(ps, "Entry Wins")),
+                first_kills=_int(_stat(ps, "First Kills")),
+                c1v1=_int(_stat(ps, "1v1Count")),
+                w1v1=_int(_stat(ps, "1v1Wins")),
+                c1v2=_int(_stat(ps, "1v2Count")),
+                w1v2=_int(_stat(ps, "1v2Wins")),
+                clutch_kills=_int(_stat(ps, "Clutch Kills")),
+                damage=_int(_stat(ps, "Damage")),
+                utility_damage=_int(_stat(ps, "Utility Damage")),
+                enemies_flashed=_int(_stat(ps, "Enemies Flashed")),
+                flash_count=_int(_stat(ps, "Flash Count")),
+                utility_count=_int(_stat(ps, "Utility Count")),
+                avatar=avatars.get(pid),
             )
             team_rec.players.append(row)
             if pid in tracked or nick in tracked.values():
@@ -397,7 +464,7 @@ def parse_match(
                     assists=row.a,
                     adr=row.adr,
                     kd=row.kd,
-                    kr=round(_float(_stat(ps, "K/R Ratio")), 2),
+                    kr=row.kr,
                     hs_pct=row.hs,
                     mvps=row.mvp,
                     result=_int(_stat(ps, "Result"), default=1 if team_rec.win else 0),
@@ -405,20 +472,20 @@ def parse_match(
                     triple=_int(_stat(ps, "Triple Kills")),
                     quadro=_int(_stat(ps, "Quadro Kills")),
                     penta=_int(_stat(ps, "Penta Kills")),
-                    entry_count=_int(_stat(ps, "Entry Count")),
-                    entry_wins=_int(_stat(ps, "Entry Wins")),
-                    first_kills=_int(_stat(ps, "First Kills")),
-                    c1v1=_int(_stat(ps, "1v1Count")),
-                    w1v1=_int(_stat(ps, "1v1Wins")),
-                    c1v2=_int(_stat(ps, "1v2Count")),
-                    w1v2=_int(_stat(ps, "1v2Wins")),
-                    clutch_kills=_int(_stat(ps, "Clutch Kills")),
-                    damage=_int(_stat(ps, "Damage")),
-                    utility_damage=_int(_stat(ps, "Utility Damage")),
-                    enemies_flashed=_int(_stat(ps, "Enemies Flashed")),
-                    flash_count=_int(_stat(ps, "Flash Count")),
+                    entry_count=row.entry_count,
+                    entry_wins=row.entry_wins,
+                    first_kills=row.first_kills,
+                    c1v1=row.c1v1,
+                    w1v1=row.w1v1,
+                    c1v2=row.c1v2,
+                    w1v2=row.w1v2,
+                    clutch_kills=row.clutch_kills,
+                    damage=row.damage,
+                    utility_damage=row.utility_damage,
+                    enemies_flashed=row.enemies_flashed,
+                    flash_count=row.flash_count,
                     flash_successes=_int(_stat(ps, "Flash Successes")),
-                    utility_count=_int(_stat(ps, "Utility Count")),
+                    utility_count=row.utility_count,
                     sniper_kills=_int(_stat(ps, "Sniper Kills")),
                     double_kills=_int(_stat(ps, "Double Kills")),
                 )

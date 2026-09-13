@@ -12,7 +12,7 @@ from .render import theme as T
 from .rules import PostKind, compute_awards
 from .stats import elo_change
 from .leetify import ATTRIBUTION, profile_url as leetify_profile_url
-from .views import MENTION_USERS, compare_view, help_view, image_view, leaderboard_view, load_example_card, match_view, text_view
+from .views import MENTION_USERS, compare_view, help_view, image_view, leaderboard_view, load_example_card, match_view, postmortem_view, text_view
 
 log = logging.getLogger(__name__)
 
@@ -200,6 +200,52 @@ def register(tree: app_commands.CommandTree, app: App) -> None:
             if snap and snap.steam_id and await app.leetify_profile(pid):
                 links.append((f"{app.nick(pid)} on Leetify", leetify_profile_url(snap.steam_id)))
         view, files = compare_view(res, png, scope_label=app.scope_label(scope), links=links)
+        await interaction.followup.send(view=view, files=files)
+
+    @tree.command(name="postmortem", description="Who actually played best in the last game: all 5 teammates ranked, friends roasted")
+    @app_commands.describe(player="Tracked nickname → their last match (default: newest match with 2+ of you)", match_id="Any FaceIT match id (1-…)")
+    @app_commands.autocomplete(player=nick_autocomplete)
+    async def postmortem(interaction: discord.Interaction, player: str | None = None, match_id: str | None = None) -> None:
+        if not await allowed(interaction):
+            return
+        focus: str | None = None
+        record = None
+        if match_id:
+            mid = match_id.strip()
+        else:
+            if player:
+                focus = app.pid_for_nick(player)
+                if not focus:
+                    await interaction.response.send_message(f"Unknown player. Tracked: {', '.join(app.tracked.values())}", ephemeral=True)
+                    return
+            else:
+                focus = app.pid_for_nick(s.discord_id_to_nick.get(interaction.user.id, ""))
+            record = app.pick_postmortem_match(focus if player else None)
+            if record is None:
+                await interaction.response.send_message("No cached matches yet.", ephemeral=True)
+                return
+            mid = record.match_id
+        await interaction.response.defer()
+        fresh = await app.fetch_record(mid, finished_at=record.finished_at if record else None, with_details=True)
+        if fresh is None:
+            await interaction.followup.send("Match not found on FaceIT (or it has no stats yet).")
+            return
+        if not fresh.players and interaction.user.id not in s.admin_discord_ids:
+            await interaction.followup.send("No tracked player in that match.")
+            return
+        if record:
+            for p, r in fresh.players.items():
+                if p in record.players:
+                    r.elo_after, r.elo_delta, r.awards = record.players[p].elo_after, record.players[p].elo_delta, record.players[p].awards
+        if fresh.players:
+            app.detect(fresh)
+            app.state.put_match(fresh)
+        res, png = await app.postmortem(fresh, focus_pid=focus)
+        links: list[tuple[str, str]] = [("Open on FaceIT", fresh.faceit_url)]
+        for row in res.rows:
+            if row.line.tracked and row.line.steam_id and len(links) < 5:
+                links.append((f"{row.nick} on Leetify", leetify_profile_url(row.line.steam_id)))
+        view, files = postmortem_view(res, png, links=links)
         await interaction.followup.send(view=view, files=files)
 
     @tree.command(name="maps", description="Per-map record for a tracked player")
