@@ -24,7 +24,8 @@ class State:
         self.liability_since: int | None = None  # unix ts; liability posts only for matches finished after this
         self.grey_zone_since: int | None = None  # unix ts; grey-zone shames only for matches finished after this
         self.recent_roasts: list[str] = []  # last roast templates used, so posts don't repeat (shared with RoastEngine)
-        self.pending_postmortems: dict[str, int] = {}  # match_id -> finished_at; waiting for Leetify / deadline
+        # match_id -> {"finished_at", "channel_id", "message_id"}: posted without Leetify, waiting to be upgraded
+        self.pending_postmortems: dict[str, dict] = {}
         self._dirty = False
         self._save_handle: asyncio.TimerHandle | None = None
 
@@ -61,7 +62,10 @@ class State:
         self.liability_since = data.get("liability_since")
         self.grey_zone_since = data.get("grey_zone_since")
         self.recent_roasts[:] = [x for x in (data.get("recent_roasts") or []) if isinstance(x, str)]
-        self.pending_postmortems = {str(k): int(v) for k, v in (data.get("pending_postmortems") or {}).items()}
+        self.pending_postmortems = {
+            str(k): (v if isinstance(v, dict) else {"finished_at": int(v)})
+            for k, v in (data.get("pending_postmortems") or {}).items()
+        }
         v1 = sum(1 for m in self.match_outcomes.values() if m.v < SCHEMA_VERSION)
         log.info(
             "Loaded %d processed match(es), %d outcome(s) (%d need enrichment), %d player snapshot(s) from %s",

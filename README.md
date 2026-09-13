@@ -99,13 +99,14 @@ See [`.env.example`](.env.example) — every variable is documented there. Highl
 | `FAME_CARRY_KILLS` / `FAME_CARRY_KD` / `FAME_CARRY_ADR` / `FAME_CARRY_SHARE` | `20` / `1.5` / `90` / `28` | Wall of Fame carry rule (see above) |
 | `GLORY_POSTS_ENABLED` | `true` | Set `false` for a shame-only channel |
 | `LIABILITY_POSTS_ENABLED` / `LIABILITY_BLAME_SHARE` / `LIABILITY_CLOSE_WIN_MARGIN` / `LIABILITY_MAX_KD` | `true` / `35` / `3` / `0.9` | Liability posts (see above). Only for matches finished after the feature is first seen (`liability_since` in state); `LIABILITY_RETROACTIVE=true` lifts that for dry runs. Tune with `python tools/liability_audit.py state.json --share 35` |
-| `POLL_INTERVAL_SECONDS` | `300` | `120` recommended for clean per-match ELO deltas |
+| `POLL_INTERVAL_SECONDS` | `300` | `60` recommended: posts and post-mortems land within ~2 min of the match, and per-match ELO deltas stay clean |
 | `POST_HISTORY_LIMIT` | `30` | "Recent" window for posts and stats |
 | `SHAME_REACTIONS` | `🤡` | Reactions added to shame posts |
 | `CUSTOM_ROASTS_FILE` | `roasts_custom.txt` | Your own roast lines (see `roasts_custom.txt.example`) |
 | `ADMIN_DISCORD_IDS` | – | Who may run `/shametest` |
 | `FAME_CHANNEL_ID` / `POSTMORTEM_CHANNEL_ID` | – | Optional channels for Wall of Fame + Redemption posts and for automatic post-mortems; unset → `SHAME_CHANNEL_ID`. Slash commands work in any configured channel |
-| `POSTMORTEM_AUTO` / `POSTMORTEM_MIN_TRACKED` / `POSTMORTEM_LEETIFY_WAIT_MINUTES` | `true` / `2` / `120` | Post a post-mortem automatically after every match with that many tracked players on one team — as soon as Leetify has processed it, or after the wait without Leetify |
+| `POSTMORTEM_AUTO` / `POSTMORTEM_MIN_TRACKED` | `true` / `2` | Post a post-mortem automatically, right after every match with that many tracked players on one team |
+| `POSTMORTEM_LEETIFY_WAIT_MINUTES` / `POSTMORTEM_LEETIFY_CHECK_SECONDS` | `360` / `180` | If Leetify had not processed the match at post time, keep checking at that interval and edit the post in place with the ratings once it has, for up to that many minutes |
 | `LEETIFY_API_KEY` | – | Optional Leetify API key (leetify.com/app/developer) for `/compare` and `/profile`; `LEETIFY_ENABLED=false` turns Leetify off |
 | `STATE_FILE` | `state.json` | Persisted cache (use a volume path in production) |
 

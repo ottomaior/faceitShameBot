@@ -115,7 +115,10 @@ class Settings:
     # --- automatic post-mortem ---------------------------------------------
     postmortem_auto: bool = _bool("POSTMORTEM_AUTO", "true")
     postmortem_min_tracked: int = _int("POSTMORTEM_MIN_TRACKED", "2")  # tracked players on the same team
-    postmortem_leetify_wait_minutes: int = _int("POSTMORTEM_LEETIFY_WAIT_MINUTES", "120")
+    # The post goes out as soon as FaceIT has the stats; for this long the bot keeps checking Leetify
+    # (every POSTMORTEM_LEETIFY_CHECK_SECONDS) and edits the post in place once the ratings exist.
+    postmortem_leetify_wait_minutes: int = _int("POSTMORTEM_LEETIFY_WAIT_MINUTES", "360")
+    postmortem_leetify_check_seconds: int = _int("POSTMORTEM_LEETIFY_CHECK_SECONDS", "180")
 
     # --- weekly digest ------------------------------------------------------
     weekly_digest_enabled: bool = _bool("WEEKLY_DIGEST_ENABLED", "false")

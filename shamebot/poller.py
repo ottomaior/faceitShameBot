@@ -28,6 +28,7 @@ class Poller:
         self._started = False
         self._poll_lock = asyncio.Lock()
         self.poll_loop.change_interval(seconds=app.settings.poll_interval_seconds)
+        self.leetify_loop.change_interval(seconds=max(60, app.settings.postmortem_leetify_check_seconds))
 
     # ------------------------------------------------------------- startup
 
@@ -51,6 +52,7 @@ class Poller:
         self.poll_loop.start()
         self.enrich_loop.start()
         self.digest_loop.start()
+        self.leetify_loop.start()
         log.info("Loops started (poll every %ss).", self.app.settings.poll_interval_seconds)
 
     async def fetch_channel(self, cid: int) -> discord.abc.Messageable | None:
@@ -191,9 +193,6 @@ class Poller:
 
                 detections = self.app.detect(record)
                 st.put_match(record)
-                if allow_post and self.postmortem_wanted(record):
-                    st.pending_postmortems[mid] = record.finished_at or int(time.time())
-                    st.mark_dirty()
                 if allow_post:
                     for det in detections:
                         if det.kind is PostKind.LIABILITY and not self._liability_live(record.finished_at):
@@ -203,6 +202,11 @@ class Poller:
                             posted += 1
                         except discord.HTTPException as exc:
                             log.error("Failed to post %s for match %s: %s", det.kind.value, mid, exc)
+                if allow_post and self.postmortem_wanted(record):
+                    try:
+                        await self.post_postmortem(record)
+                    except Exception:  # noqa: BLE001 - never let the post-mortem break the shame flow
+                        log.exception("Post-mortem for %s failed", mid)
                 st.mark_processed(mid)
                 await asyncio.sleep(1)
             st.flush()
@@ -245,10 +249,6 @@ class Poller:
             await self.poll_once(allow_post=True)
         except Exception:  # noqa: BLE001 - keep the loop alive
             log.exception("Poll cycle failed")
-        try:
-            await self.flush_postmortems()
-        except Exception:  # noqa: BLE001
-            log.exception("Post-mortem flush failed")
 
     # -------------------------------------------------------- post-mortem
 
@@ -260,24 +260,39 @@ class Poller:
         tracked = set(self.app.tracked)
         return max(sum(1 for row in t.players if row.pid in tracked) for t in record.teams) >= s.postmortem_min_tracked
 
-    async def flush_postmortems(self) -> int:
-        """Post pending post-mortems once Leetify has the match or the wait deadline passed. Returns posts sent."""
+    async def post_postmortem(self, record) -> None:
+        """Post the post-mortem right away (FaceIT stats only if Leetify is behind) and queue the Leetify upgrade."""
+        st = self.app.state
+        res, png = await self.app.postmortem(record)
+        view, files = postmortem_view(res, png, links=[("Open on FaceIT", record.faceit_url)])
+        channel = self.channels.get("postmortem", self.channel)
+        assert channel is not None
+        msg = await channel.send(view=view, files=files)
+        finished_at = record.finished_at or int(time.time())
+        log.info("Posted post-mortem for match %s: leetify=%s, %d min after the match finished.", record.match_id, res.leetify_used, (int(time.time()) - finished_at) // 60)
+        if self.app.settings.leetify_enabled and not res.leetify_used:
+            st.pending_postmortems[record.match_id] = {"finished_at": finished_at, "channel_id": getattr(channel, "id", 0), "message_id": getattr(msg, "id", 0)}
+            st.mark_dirty()
+
+    async def upgrade_postmortems(self) -> int:
+        """Re-render posted post-mortems once Leetify has the match; give up after the wait window. Returns edits made."""
         st = self.app.state
         s = self.app.settings
         if not st.pending_postmortems or self.channel is None:
             return 0
-        posted = 0
+        edited = 0
         now = int(time.time())
-        for mid, finished_at in list(st.pending_postmortems.items()):
-            deadline = finished_at + s.postmortem_leetify_wait_minutes * 60
-            if s.leetify_enabled and now < deadline and not await self.app.leetify.match_ratings(mid):
-                continue  # Leetify hasn't processed it yet; retry next cycle
+        for mid, info in list(st.pending_postmortems.items()):
+            finished_at = int(info.get("finished_at") or 0)
+            if now > finished_at + s.postmortem_leetify_wait_minutes * 60:
+                log.info("Giving up on Leetify for match %s after %d min.", mid, s.postmortem_leetify_wait_minutes)
+                del st.pending_postmortems[mid]
+                st.mark_dirty()
+                continue
+            if not await self.app.leetify.match_ratings(mid):
+                continue
             fresh = await self.app.fetch_record(mid, finished_at=finished_at, with_details=True)
             if fresh is None:
-                if now > deadline + 6 * 3600:
-                    log.warning("Dropping post-mortem for %s: stats never became available.", mid)
-                    del st.pending_postmortems[mid]
-                    st.mark_dirty()
                 continue
             cached = st.match_outcomes.get(mid)
             if cached:
@@ -288,17 +303,25 @@ class Poller:
             st.put_match(fresh)
             try:
                 res, png = await self.app.postmortem(fresh)
-                links = [("Open on FaceIT", fresh.faceit_url)]
-                view, files = postmortem_view(res, png, links=links)
-                await self.channels.get("postmortem", self.channel).send(view=view, files=files)
-                posted += 1
-                log.info("Posted post-mortem for match %s: leetify=%s, %d min after the match finished.", mid, res.leetify_used, (now - finished_at) // 60)
-            except discord.HTTPException as exc:
-                log.error("Failed to post post-mortem for %s: %s", mid, exc)
+                view, files = postmortem_view(res, png, links=[("Open on FaceIT", fresh.faceit_url)])
+                channel = self.client.get_channel(int(info.get("channel_id") or 0)) or self.channels.get("postmortem", self.channel)
+                msg = await channel.fetch_message(int(info.get("message_id") or 0))  # type: ignore[union-attr]
+                await msg.edit(view=view, attachments=files)
+                edited += 1
+                log.info("Upgraded post-mortem for match %s with Leetify ratings, %d min after the match.", mid, (now - finished_at) // 60)
+            except (discord.HTTPException, AttributeError, ValueError) as exc:
+                log.error("Could not upgrade post-mortem for %s: %s", mid, exc)
             del st.pending_postmortems[mid]
             st.mark_dirty()
         st.flush()
-        return posted
+        return edited
+
+    @tasks.loop(seconds=180)
+    async def leetify_loop(self) -> None:
+        try:
+            await self.upgrade_postmortems()
+        except Exception:  # noqa: BLE001
+            log.exception("Post-mortem Leetify upgrade failed")
 
     # -------------------------------------------------------- enrichment
 

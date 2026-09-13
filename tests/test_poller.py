@@ -62,20 +62,38 @@ class FakeFaceit:
 
 
 class FakeMessage:
+    _next_id = 1000
+
     def __init__(self):
         self.reactions = []
+        self.edits = []
+        FakeMessage._next_id += 1
+        self.id = FakeMessage._next_id
 
     async def add_reaction(self, emoji):
         self.reactions.append(emoji)
 
+    async def edit(self, *, view=None, attachments=None, **kw):
+        self.edits.append((view, attachments))
+
 
 class FakeChannel:
+    _next_id = 1
+
     def __init__(self):
         self.posts = []
+        self.messages: dict[int, FakeMessage] = {}
+        FakeChannel._next_id += 1
+        self.id = FakeChannel._next_id
 
     async def send(self, *args, view=None, files=None, allowed_mentions=None, **kw):
         self.posts.append((view, files, allowed_mentions))
-        return FakeMessage()
+        msg = FakeMessage()
+        self.messages[msg.id] = msg
+        return msg
+
+    async def fetch_message(self, mid):
+        return self.messages[mid]
 
 
 class FakeClient:
@@ -96,7 +114,7 @@ def env(tmp_path, monkeypatch):
 
 
 def _app(fixtures, tracked, tmp_path) -> tuple[App, FakeFaceit]:
-    s = Settings(state_file=str(tmp_path / "state.json"), stats_backfill_on_startup=False, post_history_limit=10, mentions={"BRNWr": 42})
+    s = Settings(state_file=str(tmp_path / "state.json"), stats_backfill_on_startup=False, post_history_limit=10, mentions={"BRNWr": 42}, postmortem_auto=False)
     app = App(s)
     fake = FakeFaceit(fixtures, tracked)
     app.faceit = fake  # type: ignore[assignment]
@@ -221,32 +239,39 @@ class _FakeLeetify:
 
 
 @pytest.mark.asyncio
-async def test_routing_and_auto_postmortem(fixtures, tracked, tmp_path, env):
+async def test_routing_and_instant_postmortem_with_leetify_upgrade(fixtures, tracked, tmp_path, env):
     app, fake = _app(fixtures, tracked, tmp_path)
     app.settings.leetify_enabled = True
-    app.settings.postmortem_leetify_wait_minutes = 120
+    app.settings.postmortem_auto = True
+    app.settings.postmortem_leetify_wait_minutes = 360
     shame, fame, pm = FakeChannel(), FakeChannel(), FakeChannel()
     poller = Poller(FakeClient(shame), app)
     poller.channel = shame
     poller.channels = {"fame": fame, "postmortem": pm}
+    poller.client.get_channel = lambda cid: {shame.id: shame, fame.id: fame, pm.id: pm}.get(cid)
     app.leetify = _FakeLeetify(None)  # Leetify has not processed anything yet
     await app.refresh_all_snapshots()
     brnwr = next(p for p, n in tracked.items() if n == "BRNWr")
     t0 = app.state.snapshot(brnwr).elo_ts
 
-    # 1) the double-feature shame match: two tracked players on one team -> shame post + pending post-mortem
+    # 1) double-feature shame match: shame post in #shame AND an immediate post-mortem in #postmortem
     mid = fake.add_match("_shame", t0 + 10)
     assert await poller.poll_once(allow_post=True) == 1
-    assert [f[0].filename.split("-")[0] for _, f, _ in shame.posts] == ["shame"] and not fame.posts and not pm.posts
-    assert app.state.pending_postmortems == {mid: t0 + 10}
+    assert [f[0].filename.split("-")[0] for _, f, _ in shame.posts] == ["shame"] and not fame.posts
+    assert len(pm.posts) == 1 and pm.posts[0][1][0].filename == "postmortem.png"
+    assert "hasn't processed" in json.dumps(pm.posts[0][0].to_components())
+    pending = app.state.pending_postmortems[mid]
+    assert pending["channel_id"] == pm.id and pending["message_id"] in pm.messages
 
-    # not ready: Leetify empty and deadline not reached
-    assert await poller.flush_postmortems() == 0 and pm.posts == [] and mid in app.state.pending_postmortems
-    # Leetify catches up -> posted to the post-mortem channel and removed from the queue
+    # Leetify still behind -> nothing edited, still pending
+    assert await poller.upgrade_postmortems() == 0 and mid in app.state.pending_postmortems
+    # Leetify catches up -> the same message is edited, no second post
     app.leetify = _FakeLeetify({row.steam_id: 0.01 * i for i, row in enumerate(app.state.match_outcomes[mid].teams[0].players)})
-    assert await poller.flush_postmortems() == 1
-    assert pm.posts[-1][1][0].filename == "postmortem.png" and not app.state.pending_postmortems
-    assert "**BRNWr**" in json.dumps(pm.posts[-1][0].to_components())
+    assert await poller.upgrade_postmortems() == 1
+    msg = pm.messages[pending["message_id"]]
+    assert len(pm.posts) == 1 and len(msg.edits) == 1 and msg.edits[0][1][0].filename == "postmortem.png"
+    assert "Leetify" in json.dumps(msg.edits[0][0].to_components()) and "hasn't processed" not in json.dumps(msg.edits[0][0].to_components())
+    assert not app.state.pending_postmortems
 
     # 2) a glory game goes to the fame channel; single tracked player on the team -> no auto post-mortem
     big = copy.deepcopy(fixtures["stats"])
@@ -256,26 +281,47 @@ async def test_routing_and_auto_postmortem(fixtures, tracked, tmp_path, env):
                 p["player_stats"]["Kills"] = "33"
     fake.fixtures = dict(fixtures, stats=big)
     app.settings.postmortem_min_tracked = 3
-    mid2 = fake.add_match("", t0 + 20)
+    fake.add_match("", t0 + 20)
     assert await poller.poll_once(allow_post=True) >= 1
     assert any(f[0].filename.startswith("glory") for _, f, _ in fame.posts)
-    assert mid2 not in app.state.pending_postmortems
+    assert len(pm.posts) == 1
 
 
 @pytest.mark.asyncio
-async def test_postmortem_deadline_posts_without_leetify(fixtures, tracked, tmp_path, env):
+async def test_postmortem_leetify_wait_expires(fixtures, tracked, tmp_path, env):
     app, fake = _app(fixtures, tracked, tmp_path)
     app.settings.leetify_enabled = True
+    app.settings.postmortem_auto = True
     app.settings.postmortem_leetify_wait_minutes = 120
     pm = FakeChannel()
     poller = Poller(FakeClient(pm), app)
     poller.channel = pm
     app.leetify = _FakeLeetify(None)
     await app.refresh_all_snapshots()
-    old = app.state.snapshot(next(iter(tracked))).elo_ts - 3 * 3600  # finished 3 h ago -> past the 2 h wait
+    old = app.state.snapshot(next(iter(tracked))).elo_ts - 3 * 3600  # finished 3 h ago -> already past the wait
     mid = fake.add_match("_shame", old)
     await poller.poll_once(allow_post=True)
-    assert mid in app.state.pending_postmortems
-    assert await poller.flush_postmortems() == 1
-    text = json.dumps(pm.posts[-1][0].to_components())
-    assert "postmortem.png" in json.dumps([f.filename for f in pm.posts[-1][1]]) and "hasn't processed" in text
+    assert sum(f[0].filename == "postmortem.png" for _, f, _ in pm.posts) == 1 and mid in app.state.pending_postmortems
+    assert await poller.upgrade_postmortems() == 0
+    assert not app.state.pending_postmortems  # dropped, message left as posted
+
+
+@pytest.mark.asyncio
+async def test_postmortem_with_leetify_at_post_time_is_not_queued(fixtures, tracked, tmp_path, env):
+    app, fake = _app(fixtures, tracked, tmp_path)
+    app.settings.leetify_enabled = True
+    app.settings.postmortem_auto = True
+    pm = FakeChannel()
+    poller = Poller(FakeClient(pm), app)
+    poller.channel = pm
+    await app.refresh_all_snapshots()
+    rec = _record_for(fixtures, tracked, "_shame")
+    app.leetify = _FakeLeetify({row.steam_id: 0.02 for row in rec.teams[0].players})
+    fake.add_match("_shame", app.state.snapshot(next(iter(tracked))).elo_ts + 5)
+    await poller.poll_once(allow_post=True)
+    assert sum(f[0].filename == "postmortem.png" for _, f, _ in pm.posts) == 1 and not app.state.pending_postmortems
+
+
+def _record_for(fixtures, tracked, suffix):
+    from shamebot.models import parse_match
+    return parse_match("x", fixtures["stats" + suffix], fixtures["details" + suffix], tracked, kill_threshold=10)
